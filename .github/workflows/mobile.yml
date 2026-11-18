@@ -1,0 +1,32 @@
+name: AutoBook mobile
+on: [push, workflow_dispatch]
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: |
+          flutter create --platforms=android,ios --org org.autopdf --project-name autobook_player player
+          cp mobile/pubspec.yaml player/pubspec.yaml
+          cp mobile/lib/main.dart player/lib/main.dart
+          cd player
+          flutter pub get
+          flutter analyze lib
+      - if: runner.os == 'Linux'
+        working-directory: player
+        run: flutter build apk --release --split-per-abi
+      - if: runner.os == 'macOS'
+        working-directory: player
+        run: flutter build ios --release --no-codesign
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AutoBook-${{ runner.os }}
+          path: |
+            player/build/app/outputs/flutter-apk/*.apk
+            player/build/ios/iphoneos/Runner.app

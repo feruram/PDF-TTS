@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+autopdf_settings.json
+*.pdf
+*.autobook
+*.wav
+*.ogg
+*.mp3
+/lack/
+/output*/
+/tmp/
+.gradle/
+build/
+local.properties

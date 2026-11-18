@@ -1,0 +1,15 @@
+name: autobook_player
+description: Offline AutoBook reader
+publish_to: none
+version: 1.0.0+1
+environment:
+  sdk: '>=3.8.0 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  just_audio: ^0.10.5
+  file_picker: ^10.3.3
+  path_provider: ^2.1.5
+  archive: ^4.0.7
+flutter:
+  uses-material-design: true

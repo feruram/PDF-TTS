@@ -1,0 +1,13 @@
+Pillow>=11.2,<12
+PyAutoGUI>=0.9.54,<1
+pynput>=1.7.7,<2
+pypdf>=5.4,<7
+pypdfium2>=4.30,<5
+pytesseract>=0.3.13,<1
+img2pdf>=0.6,<1
+pdfplumber>=0.11.8,<1
+opencv-python-headless>=4.10,<5
+soundfile>=0.13,<1
+
+
+
