@@ -45,17 +45,15 @@ class ChromeFrame(ttk.Frame):
         self.existing.grid(row=5, columnspan=2, sticky="ew")
         self.existing.columnconfigure(1, weight=1)
         self.name = StringVar()
-        self.size = StringVar(value="1400x2000")
         self.folder = StringVar(value=str(Path.home() / "Downloads"))
         self.command = StringVar(value="Capture screenshot")
         self.points = {}
         for i, (label, var) in enumerate((("資料名（再開時は同じ名前）", self.name),
-                                        ("保存PNGの幅×高さ（px）", self.size),
                                         ("Chromeのダウンロード先", self.folder),
                                         ("DevToolsの撮影コマンド名（英語）", self.command))):
             ttk.Label(self.existing, text=label).grid(row=i, column=0, sticky="w")
             ttk.Entry(self.existing, textvariable=var).grid(row=i, column=1, sticky="ew")
-        ttk.Button(self.existing, text="参照", command=self.select_folder).grid(row=2, column=2)
+        ttk.Button(self.existing, text="参照", command=self.select_folder).grid(row=1, column=2)
         for i, label in enumerate(("DevTools内の空白位置", "本文内のクリック可能な余白")):
             var = StringVar(value="画面上で指定")
             ttk.Label(self.existing, text=label).grid(row=4+i, column=0, sticky="w")
@@ -127,20 +125,13 @@ class ChromeFrame(ttk.Frame):
         if self.use_existing:
             name = self.name.get().strip()
             folder = Path(self.folder.get())
-            try:
-                width, height = map(int, self.size.get().lower().replace("×", "x").split("x"))
-                if min(width, height) < 1:
-                    raise ValueError()
-            except ValueError:
-                self.status.set("幅と高さを 1400x2000 の形式で入力してください。")
-                return
             actions = list(self.winfo_toplevel().scanner.actions)
             command = self.command.get().strip()
             if not (name and folder.is_dir() and len(self.points) == 2 and command.isascii() and (actions or count == 1)):
                 self.status.set("資料名、ダウンロード先、画面上の2点、英語コマンド、ページ送り操作を確認してください。")
                 return
             task = capture_existing
-            args = (name, count, folder, (width, height), self.points[0], self.points[1], command, actions)
+            args = (name, count, folder, self.points[0], self.points[1], command, actions)
         else:
             if not url.startswith(("https://", "http://")):
                 self.status.set("http(s)のURLを入力してください。")

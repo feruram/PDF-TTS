@@ -35,13 +35,13 @@ def wait_for_capture(folder, existing, size, stop):
                     actual = image.size
             except OSError:
                 continue
-            if actual != size:
-                raise ValueError(f"撮影結果は {actual[0]}×{actual[1]} px です。指定した画素数、DevToolsの表示サイズ、DPRを確認してください。")
-            return path
+            if size is not None and actual != size:
+                raise ValueError(f"撮影結果は {actual[0]}×{actual[1]} px です。最初の画像（{size[0]}×{size[1]} px）に合わせて表示を戻してください。")
+            return path, actual
     raise ValueError("PNGが届きません。DevToolsのクリック位置、コマンド名、Chromeの保存先と保存先確認設定を確認してください。")
 
 
-def capture_existing(root, name, count, folder, size, devtools, reader, command,
+def capture_existing(root, name, count, folder, devtools, reader, command,
                      actions, confirm, report, stop, delay=1.0, select_area=None):
     import pyautogui as mouse
     job = root / ("tab-" + hashlib.sha256(name.encode()).hexdigest()[:16])
@@ -49,10 +49,10 @@ def capture_existing(root, name, count, folder, size, devtools, reader, command,
     paths = sorted(job.glob("page-*.png"), key=lambda p: int(p.stem[5:]))
     if len(paths) > count or any(p.name != f"page-{n:04}.png" for n, p in enumerate(paths, 1)):
         raise ValueError("保存済み枚数と連番を確認してください。")
+    size = None
     if paths:
-        with Image.open(paths[-1]) as image:
-            if image.size != size:
-                raise ValueError("再開時は前回と同じ画素数を指定してください。")
+        with Image.open(paths[0]) as image:
+            size = image.size
     previous = thumbnail(paths[-1].read_bytes()) if paths else None
     area = select_area(paths[0]) if paths and select_area else None
     if len(paths) < count:
@@ -70,9 +70,11 @@ def capture_existing(root, name, count, folder, size, devtools, reader, command,
         mouse.press("enter")
         report(f"{number}/{count}枚目：撮影コマンド送信済み、PNGを待機中")
         try:
-            source = wait_for_capture(folder, existing, size, stop)
+            source, size = wait_for_capture(folder, existing, size, stop)
         except ValueError as exc:
             raise ValueError(f"{number}/{count}枚目（保存済み{len(paths)}枚）：{exc}") from exc
+        if number == 1:
+            report(f"撮影解像度：{size[0]}×{size[1]} px（自動検出）")
         sample = thumbnail(source.read_bytes())
         if previous is not None and page_difference_percent(previous, sample) <= 0.15:
             raise ValueError(f"{number}/{count}枚目のPNGを受信しましたが、前ページとの差が小さいため停止しました。保存済み{len(paths)}枚。ページ送り操作と待機時間を確認してください。")
