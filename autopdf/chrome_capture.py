@@ -37,13 +37,25 @@ def settled_page(page, previous, stop):
     raise ValueError("ページの変化・安定を確認できません。保存済み枚数を確認して再開してください。")
 
 
-def assemble(paths, destination):
+def assemble(paths, destination, area=None):
     import pikepdf
     # Import small batches so img2pdf does not accumulate a whole book of PNGs.
     with TemporaryDirectory(dir=destination.parent) as temp, pikepdf.Pdf.new() as book:
         chunk = Path(temp) / "batch.pdf"
         for index in range(0, len(paths), 12):
-            images_to_pdf(paths[index:index+12], chunk, page_size=(595.28, 841.89))
+            batch = paths[index:index+12]
+            if area:
+                cropped = []
+                for slot, path in enumerate(batch):
+                    target = Path(temp) / f"crop-{slot}.png"
+                    with Image.open(path) as image:
+                        left, top, right, bottom = area
+                        if not (0 <= left < right <= image.width and 0 <= top < bottom <= image.height):
+                            raise ValueError("指定した範囲が撮影画像からはみ出しています。")
+                        image.crop(area).save(target)
+                    cropped.append(target)
+                batch = cropped
+            images_to_pdf(batch, chunk)
             with pikepdf.Pdf.open(chunk) as part:
                 book.pages.extend(part.pages)
         finished = Path(temp) / "finished.pdf"
@@ -51,13 +63,14 @@ def assemble(paths, destination):
         finished.replace(destination)
 
 
-def run(root, url, count, key, position, confirm, report, stop):
+def run(root, url, count, key, position, confirm, report, stop, delay=1.0, select_area=None):
     from playwright.sync_api import sync_playwright
     job = root / ("chrome-" + hashlib.sha256(url.encode()).hexdigest()[:16])
     job.mkdir(parents=True, exist_ok=True)
     paths = sorted(job.glob("page-*.png"), key=lambda path: int(path.stem[5:]))
     if any(path.name != f"page-{n:04}.png" for n, path in enumerate(paths, 1)) or len(paths) > count:
         raise ValueError("保存画像の連番または総ページ数を確認してください。")
+    area = select_area(paths[0]) if paths and select_area else None
     if len(paths) < count:
         with sync_playwright() as browser:
             context = browser.chromium.launch_persistent_context(
@@ -77,18 +90,21 @@ def run(root, url, count, key, position, confirm, report, stop):
                 tmp.write_bytes(data)
                 tmp.replace(path)
                 paths.append(path)
+                if number == 1 and select_area:
+                    area = select_area(path)
                 report(f"撮影済み {number} / {count} 枚")
                 if number < count:
-                    if number == 1:
+                    if number == 1 and not select_area:
                         confirm("最初の撮影画像です。範囲と画質を確認してください。", path)
                     if position:
                         page.mouse.click(*position)
                     else:
                         page.keyboard.press("Arrow" + key if key in ("Left","Right") else key)
-                    time.sleep(0.75)
+                    if stop.wait(delay):
+                        raise ScanCancelled()
     destination = job / "book.pdf"
     if stop.is_set():
         raise ScanCancelled()
     report("PDFを作成中…")
-    assemble(paths, destination)
+    assemble(paths, destination, area)
     return destination

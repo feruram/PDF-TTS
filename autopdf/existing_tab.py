@@ -31,7 +31,7 @@ def wait_for_capture(folder, existing, size, stop):
 
 
 def capture_existing(root, name, count, folder, size, devtools, reader, command,
-                     actions, confirm, report, stop):
+                     actions, confirm, report, stop, delay=1.0, select_area=None):
     import pyautogui as mouse
     job = root / ("tab-" + hashlib.sha256(name.encode()).hexdigest()[:16])
     job.mkdir(parents=True, exist_ok=True)
@@ -43,6 +43,7 @@ def capture_existing(root, name, count, folder, size, devtools, reader, command,
             if image.size != size:
                 raise ValueError("再開時は前回と同じ画素数を指定してください。")
     previous = thumbnail(paths[-1].read_bytes()) if paths else None
+    area = select_area(paths[0]) if paths and select_area else None
     if len(paths) < count:
         confirm(f"閲覧画面の {len(paths)+1} 枚目とDevToolsを表示し、続行してください。", None)
     for number in range(len(paths)+1, count+1):
@@ -63,18 +64,20 @@ def capture_existing(root, name, count, folder, size, devtools, reader, command,
         shutil.copyfile(source, tmp)
         tmp.replace(path)
         paths.append(path)
+        if number == 1 and select_area:
+            area = select_area(path)
         report(f"撮影済み {number} / {count} 枚")
         if number < count:
-            if number == 1:
+            if number == 1 and not select_area:
                 confirm(f"初回の画像は {size[0]}×{size[1]} px です。画質を確認してください。", path)
             mouse.click(*reader)
             for action in actions:
                 if stop.is_set():
                     raise ScanCancelled()
                 execute_action(action, stop)
-            if stop.wait(1):
+            if stop.wait(delay):
                 raise ScanCancelled()
     report("PDFを作成中…")
     destination = job / "book.pdf"
-    assemble(paths, destination)
+    assemble(paths, destination, area)
     return destination

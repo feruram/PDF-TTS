@@ -1,4 +1,6 @@
+import math
 import os
+import tkinter as tk
 import threading
 from queue import Empty, Queue
 from pathlib import Path
@@ -77,6 +79,9 @@ class ChromeFrame(ttk.Frame):
         show_mode()
         bar = ttk.Frame(self)
         bar.grid(row=6, columnspan=2, sticky="w", pady=10)
+        self.delay = StringVar(value="1.0")
+        ttk.Label(bar, text="ページ送り後の待機（秒）").pack(side="left")
+        ttk.Entry(bar, width=6, textvariable=self.delay).pack(side="left", padx=4)
         self.start = ttk.Button(bar, text="スキャン開始", command=self.begin)
         self.next = ttk.Button(bar, text="続行", command=self.proceed, state="disabled")
         self.cancel = ttk.Button(bar, text="中断", command=self.stop.set, state="disabled")
@@ -108,6 +113,13 @@ class ChromeFrame(ttk.Frame):
                 raise ValueError()
         except ValueError:
             self.status.set("撮影枚数に1以上の整数を入力してください。")
+            return
+        try:
+            delay = float(self.delay.get())
+            if not math.isfinite(delay) or not 0 <= delay <= 86400:
+                raise ValueError()
+        except ValueError:
+            self.status.set("ページ送り後の待機は0～86400秒で入力してください。")
             return
         self.use_existing = self.mode.get() == "開いているタブ"
         if self.use_existing:
@@ -150,12 +162,12 @@ class ChromeFrame(ttk.Frame):
         self.start.state(["disabled"])
         self.cancel.state(["!disabled"])
         self.status.set("Chromeを準備中…")
-        threading.Thread(target=self.worker, args=(task, *args), daemon=True).start()
+        threading.Thread(target=self.worker, args=(task, delay, *args), daemon=True).start()
 
-    def worker(self, task, *args):
+    def worker(self, task, delay, *args):
         try:
             path = task(self.root / "output", *args, self.confirm,
-                       lambda msg: self.events.put(("status", msg, None)), self.stop)
+                       lambda msg: self.events.put(("status", msg, None)), self.stop, delay, self.select_area)
             result = f"PDF完成　{path}"
         except ScanCancelled:
             result = "中断しました。保存済みのページから再開できます。"
@@ -172,6 +184,66 @@ class ChromeFrame(ttk.Frame):
         if self.stop.is_set():
             raise ScanCancelled()
 
+    def select_area(self, path):
+        self.ready.clear()
+        self.events.put(("area", "PDFに載せる範囲を指定してください。", path))
+        while not self.ready.wait(0.1):
+            if self.stop.is_set():
+                raise ScanCancelled()
+        if self.stop.is_set():
+            raise ScanCancelled()
+        return self.area
+
+    def choose_area(self, path):
+        dialog = tk.Toplevel(self)
+        dialog.title("PDFに載せる範囲")
+        ttk.Label(dialog, text="本のページをドラッグで囲んでください。同じ範囲を全ページに適用します。").pack()
+        with Image.open(path) as source:
+            width, height = source.size
+            source.thumbnail((int(self.winfo_screenwidth()*0.8), int(self.winfo_screenheight()*0.7)))
+            photo = ImageTk.PhotoImage(source)
+        canvas = tk.Canvas(dialog, width=photo.width(), height=photo.height(), highlightthickness=0)
+        canvas.pack()
+        canvas.create_image(0, 0, anchor="nw", image=photo)
+        canvas.photo = photo
+        start = []
+        def press(event):
+            start[:] = [event.x, event.y]
+            canvas.delete("selection")
+            canvas.create_rectangle(*start, *start, outline="red", width=2, tags="selection")
+            apply.state(["disabled"])
+        def drag(event):
+            if start:
+                canvas.coords("selection", *start, event.x, event.y)
+        def release(event):
+            drag(event)
+            if start and abs(event.x-start[0]) > 2 and abs(event.y-start[1]) > 2:
+                apply.state(["!disabled"])
+        def finish(crop):
+            self.area = None
+            if crop:
+                x1, y1, x2, y2 = canvas.coords("selection")
+                self.area = (max(0, math.floor(min(x1,x2)*width/photo.width())),
+                             max(0, math.floor(min(y1,y2)*height/photo.height())),
+                             min(width, math.ceil(max(x1,x2)*width/photo.width())),
+                             min(height, math.ceil(max(y1,y2)*height/photo.height())))
+            dialog.destroy()
+            self.proceed()
+        def cancel():
+            self.stop.set()
+            dialog.destroy()
+        canvas.bind("<Button-1>", press)
+        canvas.bind("<B1-Motion>", drag)
+        canvas.bind("<ButtonRelease-1>", release)
+        controls = ttk.Frame(dialog)
+        controls.pack()
+        apply = ttk.Button(controls, text="選択範囲で続行", command=lambda: finish(True), state="disabled")
+        apply.pack(side="left")
+        ttk.Button(controls, text="画像全体で続行", command=lambda: finish(False)).pack(side="left")
+        dialog.protocol("WM_DELETE_WINDOW", cancel)
+        dialog.transient(self.winfo_toplevel())
+        dialog.grab_set()
+
     def proceed(self):
         self.next.state(["disabled"])
         if self.use_existing:
@@ -183,9 +255,11 @@ class ChromeFrame(ttk.Frame):
             while True:
                 kind, msg, path = self.events.get_nowait()
                 self.status.set(msg)
-                if self.use_existing and kind in ("confirm", "done"):
+                if self.use_existing and kind in ("confirm", "area", "done"):
                     self.winfo_toplevel().deiconify()
-                if kind == "confirm":
+                if kind == "area":
+                    self.choose_area(path)
+                elif kind == "confirm":
                     if path:
                         with Image.open(path) as image:
                             image.thumbnail((420, 440))
