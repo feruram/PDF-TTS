@@ -32,14 +32,6 @@ def page_difference_percent(previous: Image.Image, current: Image.Image) -> floa
     return float(stat.mean[0]) / 255.0 * 100.0
 
 
-def fit_to_a4(image: Image.Image, width: int, height: int) -> Image.Image:
-    source = image.convert("RGB")
-    source.thumbnail((width, height), Image.Resampling.LANCZOS)
-    canvas = Image.new("RGB", (width, height), "white")
-    canvas.paste(source, ((width - source.width) // 2, (height - source.height) // 2))
-    return canvas
-
-
 def execute_action(action: PageTurnAction, stop_event: threading.Event) -> None:
     if action.kind == "wait":
         _interruptible_wait(float(action.params.get("seconds", 0)), stop_event)
@@ -72,18 +64,26 @@ def execute_action(action: PageTurnAction, stop_event: threading.Event) -> None:
         raise ValueError(f"未対応のページめくり操作です: {action.kind}")
 
 
-def images_to_pdf(image_paths: list[Path], output_path: Path) -> None:
+def images_to_pdf(
+    image_paths: list[Path], output_path: Path, *, page_size: tuple[float, float] | None = None
+) -> None:
     if not image_paths:
         raise ValueError("PDFに変換する画像がありません。")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         import img2pdf
-
-        with output_path.open("wb") as stream:
-            stream.write(img2pdf.convert([str(path) for path in image_paths]))
-        return
     except ImportError:
-        pass
+        if page_size is not None:
+            raise RuntimeError("A4への配置には img2pdf が必要です。") from None
+    else:
+        options = {}
+        if page_size is not None:
+            options["layout_fun"] = img2pdf.get_layout_fun(
+                pagesize=page_size, fit=img2pdf.FitMode.into
+            )
+        with output_path.open("wb") as stream:
+            img2pdf.convert(*(str(path) for path in image_paths), outputstream=stream, **options)
+        return
 
     images = [Image.open(path).convert("RGB") for path in image_paths]
     try:
@@ -137,16 +137,12 @@ class ScanEngine:
                     )
                     break
             previous = raw.copy()
-            image = (
-                fit_to_a4(raw, profile.a4_width, profile.a4_height)
-                if profile.fit_a4
-                else raw
-            )
             image_path = image_dir / f"{profile.file_prefix}_{index + 1:04d}.jpg"
-            image.save(
+            raw.save(
                 image_path,
                 "JPEG",
                 quality=max(40, min(100, profile.jpeg_quality)),
+                subsampling=0,
                 optimize=True,
                 dpi=(300, 300),
             )
@@ -159,7 +155,10 @@ class ScanEngine:
         if not paths:
             raise ScanCancelled
         progress("PDFを作成しています。", len(paths), profile.page_count)
-        images_to_pdf(paths, pdf_path)
+        page_size = None
+        if profile.fit_a4:
+            page_size = (profile.a4_width * 72 / 300, profile.a4_height * 72 / 300)
+        images_to_pdf(paths, pdf_path, page_size=page_size)
         progress("PDFを作成しました。", len(paths), len(paths))
         return pdf_path
 

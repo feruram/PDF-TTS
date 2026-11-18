@@ -7,6 +7,7 @@ import unittest
 import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -21,7 +22,7 @@ from autopdf.models import PageTurnAction, ScanProfile, TTSSettings
 from autopdf.pdf_text import chunk_text, parse_page_range
 from autopdf.pdf_text import PDFTextExtractor
 from autopdf.sbv2 import StyleBertVITS2Client
-from autopdf.scanner import images_to_pdf, page_difference_percent
+from autopdf.scanner import ScanEngine, images_to_pdf, page_difference_percent
 
 
 def make_wav(path: Path, frames: int, value: int = 0) -> None:
@@ -33,6 +34,23 @@ def make_wav(path: Path, frames: int, value: int = 0) -> None:
 
 
 class CoreTests(unittest.TestCase):
+    def test_a4_scan_keeps_capture_pixels_and_fills_page(self):
+        from pypdf import PdfReader
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            profile = ScanProfile(page_count=1, start_delay=0, fit_a4=True)
+            with patch("autopdf.scanner.ImageGrab.grab", return_value=Image.new("RGB", (610, 845), "blue")):
+                output = ScanEngine(root).run(profile, threading.Event(), lambda *_: None)
+
+            page = PdfReader(output).pages[0]
+            self.assertAlmostEqual(float(page.mediabox.height), 841.92, places=2)
+            image, = page.images
+            self.assertEqual(image.image.size, (610, 845))
+            matrix, = [args for args, operator in page.get_contents().operations if operator == b"cm"]
+            self.assertAlmostEqual(float(matrix[0]), float(page.mediabox.width), places=2)
+            self.assertAlmostEqual(float(matrix[0]) / float(matrix[3]), 610 / 845, places=4)
+
     def test_profile_round_trip(self):
         profile = ScanProfile(actions=[PageTurnAction("click", {"x": 10, "y": 20})])
         restored = ScanProfile.from_dict(profile.to_dict())
