@@ -14,6 +14,7 @@ from .layout_filter import OllamaContentFilter
 from .models import PageTurnAction, ScanProfile, TTSSettings
 from .scanner import PageTurnRecorder, ScanCancelled, ScanEngine, execute_action
 from .sbv2 import ModelInfo, StyleBertVITS2Client
+from .screen_picker import ScreenPicker, enable_screen_dpi_awareness
 from .tts_job import PDFTTSJob, TTSCancelled
 
 
@@ -89,14 +90,9 @@ class ScannerFrame(ttk.Frame):
             )
         ttk.Button(
             profile_box,
-            text="現在のカーソル→左上",
-            command=lambda: self.capture_cursor("left", "top"),
-        ).grid(row=2, column=0, columnspan=2, sticky="ew", padx=2, pady=3)
-        ttk.Button(
-            profile_box,
-            text="現在のカーソル→右下",
-            command=lambda: self.capture_cursor("right", "bottom"),
-        ).grid(row=2, column=2, columnspan=2, sticky="ew", padx=2, pady=3)
+            text="画面上で撮影範囲を選択",
+            command=self.pick_capture_area,
+        ).grid(row=2, column=0, columnspan=4, sticky="ew", padx=2, pady=3)
 
         fields = [
             ("ページ数", "page_count"),
@@ -268,16 +264,45 @@ class ScannerFrame(ttk.Frame):
         if path:
             self.vars["output_dir"].set(path)
 
-    def capture_cursor(self, x_key: str, y_key: str) -> None:
+    def pick_capture_area(self) -> None:
+        keys = ("left", "top", "right", "bottom")
         try:
-            import pyautogui
+            previous = tuple(int(self.vars[key].get()) for key in keys)
+        except ValueError:
+            previous = None
 
-            x, y = pyautogui.position()
-            self.vars[x_key].set(x)
-            self.vars[y_key].set(y)
-            self.status.set(f"カーソル座標 ({x}, {y}) を設定しました。")
-        except Exception as exc:
-            messagebox.showerror("座標取得エラー", str(exc), parent=self)
+        def apply_area(area):
+            for key, coordinate in zip(keys, area):
+                self.vars[key].set(coordinate)
+            self.status.set(f"撮影範囲を設定しました。{area[2] - area[0]} × {area[3] - area[1]} px")
+
+        self._pick_on_screen(point=False, previous=previous, apply_selection=apply_area)
+
+    def _pick_on_screen(self, *, point, previous=None, apply_selection) -> None:
+        if self.running:
+            return
+        window_state = self.app.state()
+        self.app.withdraw()
+
+        def select():
+            result = None
+            error = None
+            try:
+                picker = ScreenPicker(self.app, point=point, previous=previous)
+                self.app.wait_window(picker)
+                result = picker.result
+            except Exception as exc:
+                error = exc
+            finally:
+                self.app.state(window_state)
+                self.app.lift()
+            if error:
+                messagebox.showerror("画面選択エラー", str(error), parent=self)
+            elif result is not None:
+                apply_selection(result)
+
+        # Let Windows remove the settings window before grabbing the desktop.
+        self.app.after(150, select)
 
     def refresh_actions(self) -> None:
         self.action_tree.delete(*self.action_tree.get_children())
@@ -292,24 +317,15 @@ class ScannerFrame(ttk.Frame):
             self.actions.append(PageTurnAction("key", {"key": key.strip()}))
             self.refresh_actions()
 
-    def _cursor_position(self) -> tuple[int, int]:
-        import pyautogui
-
-        point = pyautogui.position()
-        return int(point.x), int(point.y)
-
     def add_click(self) -> None:
-        try:
-            x, y = self._cursor_position()
-            value = simpledialog.askstring(
-                "クリック", "x,y（現在位置を初期値にしています）", initialvalue=f"{x},{y}", parent=self
-            )
-            if value:
-                px, py = (int(item.strip()) for item in value.split(",", 1))
-                self.actions.append(PageTurnAction("click", {"x": px, "y": py, "button": "left"}))
-                self.refresh_actions()
-        except Exception as exc:
-            messagebox.showerror("入力エラー", str(exc), parent=self)
+        def apply_point(point):
+            x, y = point
+            self.actions.append(PageTurnAction("click", {"x": x, "y": y, "button": "left"}))
+            self.refresh_actions()
+            self.action_tree.selection_set(str(len(self.actions) - 1))
+            self.status.set(f"クリック位置 ({x}, {y}) を追加しました。")
+
+        self._pick_on_screen(point=True, apply_selection=apply_point)
 
     def add_drag(self) -> None:
         value = simpledialog.askstring(
@@ -976,6 +992,7 @@ class AutoPDFApp(tk.Tk):
 
 
 def launch(project_root: Path | None = None) -> None:
+    enable_screen_dpi_awareness()
     root = Path(project_root or Path.cwd()).resolve()
     AutoPDFApp(root).mainloop()
 
