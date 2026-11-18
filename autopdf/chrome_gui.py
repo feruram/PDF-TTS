@@ -91,6 +91,8 @@ class ChromeFrame(ttk.Frame):
         ttk.Label(self, textvariable=self.status, wraplength=760).grid(row=7, columnspan=2, sticky="w")
         self.preview = ttk.Label(self)
         self.preview.grid(row=8, columnspan=2, pady=8)
+        self.history = tk.Text(self, height=6, state="disabled", wrap="word")
+        self.history.grid(row=9, columnspan=2, sticky="ew")
         self.after(100, self.poll)
 
     def select_folder(self):
@@ -157,6 +159,9 @@ class ChromeFrame(ttk.Frame):
             args = (url, count, key, position)
         self.preview.configure(image="")
         self.preview.unbind("<Button-1>")
+        self.history.configure(state="normal")
+        self.history.delete("1.0", "end")
+        self.history.configure(state="disabled")
         self.stop.clear()
         self.running = True
         self.start.state(["disabled"])
@@ -242,23 +247,33 @@ class ChromeFrame(ttk.Frame):
         ttk.Button(controls, text="画像全体で続行", command=lambda: finish(False)).pack(side="left")
         dialog.protocol("WM_DELETE_WINDOW", cancel)
         dialog.transient(self.winfo_toplevel())
+        dialog.lift()
+        dialog.wait_visibility()
         dialog.grab_set()
+        dialog.focus_set()
 
     def proceed(self):
         self.next.state(["disabled"])
         if self.use_existing:
-            self.winfo_toplevel().iconify()
-        self.ready.set()
+            window = self.winfo_toplevel()
+            window.iconify()
+            self.after(350, self.ready.set)
+        else:
+            self.ready.set()
 
     def poll(self):
         try:
             while True:
                 kind, msg, path = self.events.get_nowait()
                 self.status.set(msg)
+                self.history.configure(state="normal")
+                self.history.insert("end", msg + "\n")
+                self.history.see("end")
+                self.history.configure(state="disabled")
                 if self.use_existing and kind in ("confirm", "area", "done"):
                     self.winfo_toplevel().deiconify()
                 if kind == "area":
-                    self.choose_area(path)
+                    self.after_idle(lambda p=path: self.choose_area(p))
                 elif kind == "confirm":
                     if path:
                         with Image.open(path) as image:

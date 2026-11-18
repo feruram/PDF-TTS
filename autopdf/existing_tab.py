@@ -9,12 +9,23 @@ from .chrome_capture import assemble, thumbnail
 from .scanner import ScanCancelled, execute_action, page_difference_percent
 
 
+def png_versions(folder):
+    versions = {}
+    for path in folder.glob("*.png"):
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            continue
+        versions[path] = (stat.st_mtime_ns, stat.st_size)
+    return versions
+
+
 def wait_for_capture(folder, existing, size, stop):
     deadline = time.monotonic() + 25
     while time.monotonic() < deadline:
         if stop.wait(0.2):
             raise ScanCancelled()
-        candidates = set(folder.glob("*.png")) - existing
+        candidates = [p for p, version in png_versions(folder).items() if existing.get(p) != version]
         if len(candidates) > 1:
             raise ValueError("複数のPNGを検出しました。撮影中は他のダウンロードを停止してください。")
         for path in candidates:
@@ -47,17 +58,24 @@ def capture_existing(root, name, count, folder, size, devtools, reader, command,
     if len(paths) < count:
         confirm(f"閲覧画面の {len(paths)+1} 枚目とDevToolsを表示し、続行してください。", None)
     for number in range(len(paths)+1, count+1):
-        existing = set(folder.glob("*.png"))
+        if stop.is_set():
+            raise ScanCancelled()
+        report(f"{number}/{count}枚目：DevToolsに撮影コマンドを送信中")
+        existing = png_versions(folder)
         mouse.click(*devtools)
         mouse.hotkey("ctrl", "shift", "p")
         time.sleep(0.35)
         mouse.write(command, interval=0.025)
         time.sleep(0.3)
         mouse.press("enter")
-        source = wait_for_capture(folder, existing, size, stop)
+        report(f"{number}/{count}枚目：撮影コマンド送信済み、PNGを待機中")
+        try:
+            source = wait_for_capture(folder, existing, size, stop)
+        except ValueError as exc:
+            raise ValueError(f"{number}/{count}枚目（保存済み{len(paths)}枚）：{exc}") from exc
         sample = thumbnail(source.read_bytes())
         if previous is not None and page_difference_percent(previous, sample) <= 0.15:
-            raise ValueError("前ページから変化を確認できません。開始ページとページ送り操作を確認してください。")
+            raise ValueError(f"{number}/{count}枚目のPNGを受信しましたが、前ページとの差が小さいため停止しました。保存済み{len(paths)}枚。ページ送り操作と待機時間を確認してください。")
         previous = sample
         path = job / f"page-{number:04}.png"
         tmp = path.with_suffix(".tmp")
@@ -70,6 +88,7 @@ def capture_existing(root, name, count, folder, size, devtools, reader, command,
         if number < count:
             if number == 1 and not select_area:
                 confirm(f"初回の画像は {size[0]}×{size[1]} px です。画質を確認してください。", path)
+            report(f"{number+1}/{count}枚目へのページ送り中")
             mouse.click(*reader)
             for action in actions:
                 if stop.is_set():
