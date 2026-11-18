@@ -7,7 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from PIL import Image
-from playwright.sync_api import sync_playwright
+from .scanner import ScanCancelled
 
 from autopdf.scanner import images_to_pdf, page_difference_percent
 
@@ -17,11 +17,13 @@ def thumbnail(data):
         return image.convert("L").resize((160, 160))
 
 
-def settled_page(page, previous):
+def settled_page(page, previous, stop):
     deadline = time.monotonic() + 25
     last = None
     stable_since = time.monotonic()
     while time.monotonic() < deadline:
+        if stop.is_set():
+            raise ScanCancelled()
         data = page.screenshot(type="png", animations="disabled", timeout=15000)
         sample = thumbnail(data)
         if last is None or page_difference_percent(last, sample) > 0.05:
@@ -49,25 +51,11 @@ def assemble(paths, destination):
         finished.replace(destination)
 
 
-def run():
-    url = input("教本ビューアのURL: ").strip()
-    if not url.startswith(("https://", "http://")):
-        raise ValueError("http(s)のURLを入力してください。")
-    count = int(input("総ページ数 [810]: ").strip() or 810)
-    if not 1 <= count <= 9999:
-        raise ValueError("総ページ数は1～9999です。")
-    key = input("次ページのキー [Right] (Left / PageDown / click): ").strip() or "Right"
-    position = None
-    if key == "click":
-        position = tuple(map(int, input("次へボタンの仮想画面座標 x,y: ").split(",")))
-        if len(position) != 2:
-            raise ValueError("x,y の2値を指定してください。")
-    elif key not in ("Right", "Left", "PageDown"):
-        raise ValueError("表示されたキーから選んでください。")
-    root = Path(__file__).resolve().parent / "output"
+def run(root, url, count, key, position, confirm, report, stop):
+    from playwright.sync_api import sync_playwright
     job = root / ("chrome-" + hashlib.sha256(url.encode()).hexdigest()[:16])
     job.mkdir(parents=True, exist_ok=True)
-    paths = sorted(job.glob("page-????.png"))
+    paths = sorted(job.glob("page-*.png"), key=lambda path: int(path.stem[5:]))
     if any(path.name != f"page-{n:04}.png" for n, path in enumerate(paths, 1)) or len(paths) > count:
         raise ValueError("保存画像の連番または総ページ数を確認してください。")
     if len(paths) < count:
@@ -79,35 +67,28 @@ def run():
             )
             page = context.pages[0]
             page.goto(url, wait_until="domcontentloaded")
-            input(f"Chromeでログインし、教本の {len(paths)+1} ページ目を表示してください。"
-                  "必要なら本文をクリックしてから、この画面でEnter: ")
+            confirm(f"Chromeで開始位置（今回の {len(paths)+1} 枚目）を表示してから、撮影を開始してください。", None)
             page = context.pages[-1]
-            print("撮影中。Ctrl+Cで中断できます。保存先:", job)
             previous = thumbnail(paths[-1].read_bytes()) if paths else None
             for number in range(len(paths)+1, count+1):
-                data, previous = settled_page(page, previous)
+                data, previous = settled_page(page, previous, stop)
                 path = job / f"page-{number:04}.png"
                 tmp = path.with_suffix(".tmp")
                 tmp.write_bytes(data)
                 tmp.replace(path)
                 paths.append(path)
-                print(f"{number}/{count}", flush=True)
+                report(f"撮影済み {number} / {count} 枚")
                 if number < count:
                     if number == 1:
-                        print("最初の撮影画像:", path)
-                        input("このPNGでページ全体・画質を確認し、残りを自動撮影するにはEnter: ")
+                        confirm("最初の撮影画像です。範囲と画質を確認してください。", path)
                     if position:
                         page.mouse.click(*position)
                     else:
                         page.keyboard.press("Arrow" + key if key in ("Left","Right") else key)
                     time.sleep(0.75)
     destination = job / "book.pdf"
+    if stop.is_set():
+        raise ScanCancelled()
+    report("PDFを作成中…")
     assemble(paths, destination)
-    print("PDF完成:", destination)
-
-
-if __name__ == "__main__":
-    try:
-        run()
-    except KeyboardInterrupt:
-        print("中断しました。保存済み画像から再開できます。")
+    return destination

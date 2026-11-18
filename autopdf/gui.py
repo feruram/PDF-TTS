@@ -172,9 +172,6 @@ class ScannerFrame(ttk.Frame):
         self.progress.grid(row=0, column=0, sticky="ew", padx=(0, 8))
         self.start_button = ttk.Button(control, text="スキャン開始", command=self.start_scan)
         self.start_button.grid(row=0, column=1, padx=2)
-        ttk.Button(control, text="Chrome高解像度スキャン",
-                   command=lambda: os.startfile(self.app.project_root / "chrome_scan.bat")
-                   ).grid(row=0, column=3, padx=2)
         self.stop_button = ttk.Button(
             control, text="停止", command=self.stop_scan, state="disabled"
         )
@@ -961,6 +958,9 @@ class AutoPDFApp(tk.Tk):
         self.scanner = ScannerFrame(notebook, self)
         self.tts = TTSFrame(notebook, self, tts, ui)
         notebook.add(self.scanner, text="  スキャン→PDF  ")
+        from .chrome_gui import ChromeFrame
+        self.chrome = ChromeFrame(notebook, project_root)
+        notebook.add(self.chrome, text="  Chrome高解像度スキャン  ")
         notebook.add(self.tts, text="  PDF→Style-Bert-VITS2  ")
         self.scanner.refresh_profile_names()
         selected = ui.get("scan_profile")
@@ -978,11 +978,12 @@ class AutoPDFApp(tk.Tk):
         self.store.save(self.profiles, tts, ui)
 
     def on_close(self) -> None:
-        if self.scanner.running or self.tts.running:
+        if self.scanner.running or self.tts.running or self.chrome.running:
             if not messagebox.askyesno(
                 "処理中", "処理中です。停止を要求して終了しますか？", parent=self
             ):
                 return
+            self.chrome.stop.set()
             self.scanner.stop_event.set()
             self.tts.stop_event.set()
         try:
