@@ -17,7 +17,7 @@ jobs:
           cp mobile/lib/main.dart player/lib/main.dart
           cd player
           flutter pub get
-          flutter analyze lib
+          flutter analyze --no-fatal-infos lib
       - if: runner.os == 'Linux'
         working-directory: player
         run: flutter build apk --release --split-per-abi

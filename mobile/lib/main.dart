@@ -67,7 +67,8 @@ class _ReaderState extends State<Reader> {
 
   @override
   void dispose() {
-    player.dispose().then((_) => current?.delete(recursive: true));
+    final directory = current;
+    player.dispose().then((_) async { await directory?.delete(recursive: true); });
     super.dispose();
   }
 
