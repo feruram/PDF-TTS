@@ -130,12 +130,11 @@ class ScanEngine:
             if previous is not None and profile.stop_on_duplicate:
                 difference = page_difference_percent(previous, raw)
                 if difference < profile.duplicate_threshold:
-                    progress(
-                        f"前ページとの差が{difference:.3f}%のため撮影を停止しました。",
-                        index,
-                        profile.page_count,
+                    raise ValueError(
+                        f"{index}/{profile.page_count}枚で停止しました。"
+                        f"前ページとの差が{difference:.3f}%です。"
+                        "ページ送りと待機時間を確認してください。今回のPDFは作成していません。"
                     )
-                    break
             previous = raw.copy()
             image_path = image_dir / f"{profile.file_prefix}_{index + 1:04d}.jpg"
             raw.save(
