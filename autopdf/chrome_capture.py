@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from PIL import Image
+from PIL import Image, ImageOps
 from .scanner import ScanCancelled
 
 from autopdf.scanner import images_to_pdf, page_difference_percent
@@ -15,6 +15,14 @@ from autopdf.scanner import images_to_pdf, page_difference_percent
 def thumbnail(data):
     with Image.open(io.BytesIO(data)) as image:
         return image.convert("L").resize((160, 160))
+
+
+def save_page(image, destination, size):
+    if image.size == size:
+        image.save(destination, format="PNG")
+    else:
+        fitted = ImageOps.pad(image.convert("RGB"), size, method=Image.Resampling.LANCZOS, color="white")
+        fitted.save(destination, format="PNG")
 
 
 def settled_page(page, previous, stop):
@@ -37,22 +45,32 @@ def settled_page(page, previous, stop):
     raise ValueError("ページの変化・安定を確認できません。保存済み枚数を確認して再開してください。")
 
 
-def assemble(paths, destination, area=None):
+def assemble(paths, destination, area=None, output_size=None):
     import pikepdf
+    with Image.open(paths[0]) as first:
+        reference = first.size
     # Import small batches so img2pdf does not accumulate a whole book of PNGs.
     with TemporaryDirectory(dir=destination.parent) as temp, pikepdf.Pdf.new() as book:
         chunk = Path(temp) / "batch.pdf"
         for index in range(0, len(paths), 12):
             batch = paths[index:index+12]
-            if area:
+            if area or output_size:
                 cropped = []
                 for slot, path in enumerate(batch):
                     target = Path(temp) / f"crop-{slot}.png"
                     with Image.open(path) as image:
-                        left, top, right, bottom = area
+                        if not area and image.size == output_size:
+                            cropped.append(path)
+                            continue
+                        box = area or (0, 0, *reference)
+                        left, top, right, bottom = (
+                            round(value * image.size[i % 2] / reference[i % 2])
+                            for i, value in enumerate(box)
+                        )
                         if not (0 <= left < right <= image.width and 0 <= top < bottom <= image.height):
                             raise ValueError("指定した範囲が撮影画像からはみ出しています。")
-                        image.crop(area).save(target)
+                        region = image.crop((left, top, right, bottom))
+                        save_page(region, target, output_size or region.size)
                     cropped.append(target)
                 batch = cropped
             images_to_pdf(batch, chunk)
@@ -63,7 +81,7 @@ def assemble(paths, destination, area=None):
         finished.replace(destination)
 
 
-def run(root, url, count, key, position, confirm, report, stop, delay=1.0, select_area=None):
+def run(root, url, count, key, position, confirm, report, stop, delay=1.0, select_area=None, output_size=(1400, 2000)):
     from playwright.sync_api import sync_playwright
     job = root / ("chrome-" + hashlib.sha256(url.encode()).hexdigest()[:16])
     job.mkdir(parents=True, exist_ok=True)
@@ -87,7 +105,8 @@ def run(root, url, count, key, position, confirm, report, stop, delay=1.0, selec
                 data, previous = settled_page(page, previous, stop)
                 path = job / f"page-{number:04}.png"
                 tmp = path.with_suffix(".tmp")
-                tmp.write_bytes(data)
+                with Image.open(io.BytesIO(data)) as image:
+                    save_page(image, tmp, output_size)
                 tmp.replace(path)
                 paths.append(path)
                 if number == 1 and select_area:
@@ -106,5 +125,5 @@ def run(root, url, count, key, position, confirm, report, stop, delay=1.0, selec
     if stop.is_set():
         raise ScanCancelled()
     report("PDFを作成中…")
-    assemble(paths, destination, area)
+    assemble(paths, destination, area, output_size)
     return destination

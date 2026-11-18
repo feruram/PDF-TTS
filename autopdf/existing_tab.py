@@ -1,11 +1,10 @@
 """Capture the viewport of a user-prepared DevTools session without navigating."""
 import hashlib
-import shutil
 import time
 
 from PIL import Image
 
-from .chrome_capture import assemble, thumbnail
+from .chrome_capture import assemble, save_page, thumbnail
 from .scanner import ScanCancelled, execute_action, page_difference_percent
 
 
@@ -20,7 +19,7 @@ def png_versions(folder):
     return versions
 
 
-def wait_for_capture(folder, existing, size, stop):
+def wait_for_capture(folder, existing, stop):
     deadline = time.monotonic() + 25
     while time.monotonic() < deadline:
         if stop.wait(0.2):
@@ -35,24 +34,18 @@ def wait_for_capture(folder, existing, size, stop):
                     actual = image.size
             except OSError:
                 continue
-            if size is not None and actual != size:
-                raise ValueError(f"撮影結果は {actual[0]}×{actual[1]} px です。最初の画像（{size[0]}×{size[1]} px）に合わせて表示を戻してください。")
             return path, actual
     raise ValueError("PNGが届きません。DevToolsのクリック位置、コマンド名、Chromeの保存先と保存先確認設定を確認してください。")
 
 
 def capture_existing(root, name, count, folder, devtools, reader, command,
-                     actions, confirm, report, stop, delay=1.0, select_area=None):
+                     actions, confirm, report, stop, delay=1.0, select_area=None, output_size=(1400, 2000)):
     import pyautogui as mouse
     job = root / ("tab-" + hashlib.sha256(name.encode()).hexdigest()[:16])
     job.mkdir(parents=True, exist_ok=True)
     paths = sorted(job.glob("page-*.png"), key=lambda p: int(p.stem[5:]))
     if len(paths) > count or any(p.name != f"page-{n:04}.png" for n, p in enumerate(paths, 1)):
         raise ValueError("保存済み枚数と連番を確認してください。")
-    size = None
-    if paths:
-        with Image.open(paths[0]) as image:
-            size = image.size
     previous = thumbnail(paths[-1].read_bytes()) if paths else None
     area = select_area(paths[0]) if paths and select_area else None
     if len(paths) < count:
@@ -70,18 +63,19 @@ def capture_existing(root, name, count, folder, devtools, reader, command,
         mouse.press("enter")
         report(f"{number}/{count}枚目：撮影コマンド送信済み、PNGを待機中")
         try:
-            source, size = wait_for_capture(folder, existing, size, stop)
+            source, size = wait_for_capture(folder, existing, stop)
         except ValueError as exc:
             raise ValueError(f"{number}/{count}枚目（保存済み{len(paths)}枚）：{exc}") from exc
         if number == 1:
-            report(f"撮影解像度：{size[0]}×{size[1]} px（自動検出）")
+            report(f"撮影解像度：{size[0]}×{size[1]} px → 保存：{output_size[0]}×{output_size[1]} px")
         sample = thumbnail(source.read_bytes())
         if previous is not None and page_difference_percent(previous, sample) <= 0.15:
             raise ValueError(f"{number}/{count}枚目のPNGを受信しましたが、前ページとの差が小さいため停止しました。保存済み{len(paths)}枚。ページ送り操作と待機時間を確認してください。")
         previous = sample
         path = job / f"page-{number:04}.png"
         tmp = path.with_suffix(".tmp")
-        shutil.copyfile(source, tmp)
+        with Image.open(source) as image:
+            save_page(image, tmp, output_size)
         tmp.replace(path)
         paths.append(path)
         if number == 1 and select_area:
@@ -100,5 +94,5 @@ def capture_existing(root, name, count, folder, devtools, reader, command,
                 raise ScanCancelled()
     report("PDFを作成中…")
     destination = job / "book.pdf"
-    assemble(paths, destination, area)
+    assemble(paths, destination, area, output_size)
     return destination

@@ -77,6 +77,9 @@ class ChromeFrame(ttk.Frame):
         show_mode()
         bar = ttk.Frame(self)
         bar.grid(row=6, columnspan=2, sticky="w", pady=10)
+        self.output_size = StringVar(value="1400x2000")
+        ttk.Label(bar, text="保存サイズ（px）").pack(side="left")
+        ttk.Entry(bar, width=12, textvariable=self.output_size).pack(side="left", padx=4)
         self.delay = StringVar(value="1.0")
         ttk.Label(bar, text="ページ送り後の待機（秒）").pack(side="left")
         ttk.Entry(bar, width=6, textvariable=self.delay).pack(side="left", padx=4)
@@ -121,6 +124,13 @@ class ChromeFrame(ttk.Frame):
         except ValueError:
             self.status.set("ページ送り後の待機は0～86400秒で入力してください。")
             return
+        try:
+            width, height = map(int, self.output_size.get().lower().replace("×", "x").split("x"))
+            if min(width, height) < 1 or width * height > Image.MAX_IMAGE_PIXELS:
+                raise ValueError()
+        except ValueError:
+            self.status.set("保存サイズは正の整数で指定してください（例：1400x2000、最大約8900万画素）。")
+            return
         self.use_existing = self.mode.get() == "開いているタブ"
         if self.use_existing:
             name = self.name.get().strip()
@@ -158,12 +168,12 @@ class ChromeFrame(ttk.Frame):
         self.start.state(["disabled"])
         self.cancel.state(["!disabled"])
         self.status.set("Chromeを準備中…")
-        threading.Thread(target=self.worker, args=(task, delay, *args), daemon=True).start()
+        threading.Thread(target=self.worker, args=(task, delay, (width, height), *args), daemon=True).start()
 
-    def worker(self, task, delay, *args):
+    def worker(self, task, delay, output_size, *args):
         try:
             path = task(self.root / "output", *args, self.confirm,
-                       lambda msg: self.events.put(("status", msg, None)), self.stop, delay, self.select_area)
+                       lambda msg: self.events.put(("status", msg, None)), self.stop, delay, self.select_area, output_size)
             result = f"PDF完成　{path}"
         except ScanCancelled:
             result = "中断しました。保存済みのページから再開できます。"
