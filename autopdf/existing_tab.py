@@ -38,18 +38,26 @@ def wait_for_capture(folder, existing, stop):
     raise ValueError("PNGが届きません。DevToolsのクリック位置、コマンド名、Chromeの保存先と保存先確認設定を確認してください。")
 
 
+def scan_folder(root, name):
+    digest = hashlib.sha256(name.encode()).hexdigest()[:16]
+    current = root / "jobs" / digest
+    legacy = root / ("tab-" + digest)
+    return legacy if legacy.is_dir() and not current.exists() else current
+
+
 def capture_existing(root, name, count, folder, devtools, reader, command,
                      actions, confirm, report, stop, delay=1.0, select_area=None, output_size=(1400, 2000)):
     import pyautogui as mouse
-    job = root / ("tab-" + hashlib.sha256(name.encode()).hexdigest()[:16])
+    job = scan_folder(root, name)
     job.mkdir(parents=True, exist_ok=True)
     paths = sorted(job.glob("page-*.png"), key=lambda p: int(p.stem[5:]))
     if len(paths) > count or any(p.name != f"page-{n:04}.png" for n, p in enumerate(paths, 1)):
         raise ValueError("保存済み枚数と連番を確認してください。")
+    report(f"資料「{name}」：保存済み {len(paths)}/{count} 枚　保存先 {job}")
     previous = thumbnail(paths[-1].read_bytes()) if paths else None
     area = select_area(paths[0]) if paths and select_area else None
     if len(paths) < count:
-        confirm(f"閲覧画面の {len(paths)+1} 枚目とDevToolsを表示し、続行してください。", None)
+        confirm(f"保存済み {len(paths)}/{count} 枚。ビューアで次に撮影するページを表示してください。次の保存番号は {len(paths)+1} です。", None)
     for number in range(len(paths)+1, count+1):
         if stop.is_set():
             raise ScanCancelled()

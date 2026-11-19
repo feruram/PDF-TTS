@@ -6,7 +6,7 @@ from queue import Empty, Queue
 from pathlib import Path
 from tkinter import StringVar, filedialog, ttk
 
-from .existing_tab import capture_existing
+from .existing_tab import capture_existing, scan_folder
 
 from PIL import Image, ImageTk
 
@@ -60,6 +60,18 @@ class ChromeFrame(ttk.Frame):
             ttk.Button(self.existing, textvariable=var, command=lambda n=i, v=var:
                        self.pick_point(n, v)).grid(row=4+i, column=1, sticky="w")
         ttk.Label(self.existing, text="ページ送りは「スキャン→PDF」で編集中の操作列を使用します。").grid(row=6, columnspan=3)
+        self.resume_info = StringVar()
+        ttk.Label(self.existing, textvariable=self.resume_info).grid(row=7, columnspan=3, sticky="w")
+        def show_saved(*_):
+            name = self.name.get().strip()
+            if name:
+                job = scan_folder(self.root / "output", name)
+                saved = sum(1 for _ in job.glob("page-*.png"))
+                self.resume_info.set(f"保存済み {saved} 枚　次の保存番号 {saved+1}" if saved else "新規撮影（保存済み0枚）")
+            else:
+                self.resume_info.set("")
+        self.name.trace_add("write", show_saved)
+        self.refresh_saved = show_saved
         def show_mode(*_):
             active = self.mode.get() == "開いているタブ"
             for row in (1, 3, 4):
@@ -284,6 +296,7 @@ class ChromeFrame(ttk.Frame):
                         self.preview.bind("<Button-1>", lambda event, p=path: os.startfile(p))
                     self.next.state(["!disabled"])
                 elif kind == "done":
+                    self.refresh_saved()
                     self.running = False
                     self.start.state(["!disabled"])
                     self.next.state(["disabled"])
