@@ -515,7 +515,10 @@ class TTSFrame(ttk.Frame):
         self.page_range = tk.StringVar(value=ui.get("page_range", ""))
         self.extract_mode = tk.StringVar(value=ui.get("extract_mode", "auto"))
         self.tesseract_cmd = tk.StringVar(value=ui.get("tesseract_cmd", ""))
-        self.ocr_language = tk.StringVar(value=ui.get("ocr_language", "jpn"))
+        language = ui.get("ocr_language", "jpn+eng+fra")
+        if language == "jpn" and not ui.get("multilingual_ocr_configured"):
+            language = "jpn+eng+fra"
+        self.ocr_language = tk.StringVar(value=language)
         self.exclude_tables = tk.BooleanVar(value=ui.get("exclude_tables", True))
         self.exclude_images = tk.BooleanVar(value=ui.get("exclude_images", True))
         self.exclude_captions = tk.BooleanVar(value=ui.get("exclude_captions", True))
@@ -688,7 +691,7 @@ class TTSFrame(ttk.Frame):
         return {
             "last_pdf": self.pdf_path.get(), "tts_output_dir": self.output_dir.get(),
             "page_range": self.page_range.get(), "extract_mode": self.extract_mode.get(),
-            "tesseract_cmd": self.tesseract_cmd.get(), "ocr_language": self.ocr_language.get(),
+            "tesseract_cmd": self.tesseract_cmd.get(), "ocr_language": self.ocr_language.get(), "multilingual_ocr_configured": True,
             "exclude_tables": self.exclude_tables.get(),
             "exclude_images": self.exclude_images.get(),
             "exclude_captions": self.exclude_captions.get(),

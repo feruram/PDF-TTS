@@ -4,6 +4,8 @@ import re
 from collections.abc import Callable
 from pathlib import Path
 
+from .ocr_setup import DATA, LANGUAGES
+
 from .layout_filter import (
     OllamaContentFilter,
     detect_table_regions,
@@ -102,9 +104,9 @@ class PDFTextExtractor:
         pdf_path: Path,
         mode: str = "auto",
         tesseract_cmd: str = "",
-        ocr_language: str = "jpn",
+        ocr_language: str = LANGUAGES,
         ocr_dpi: int = 250,
-        ocr_psm: int = 6,
+        ocr_psm: int = 3,
         exclude_tables: bool = True,
         exclude_images: bool = True,
         exclude_captions: bool = True,
@@ -115,7 +117,7 @@ class PDFTextExtractor:
         self.pdf_path = Path(pdf_path)
         self.mode = mode
         self.tesseract_cmd = tesseract_cmd.strip()
-        self.ocr_language = ocr_language.strip() or "jpn"
+        self.ocr_language = ocr_language.strip() or LANGUAGES
         self.ocr_dpi = ocr_dpi
         self.ocr_psm = ocr_psm
         self.exclude_tables = exclude_tables
@@ -145,6 +147,7 @@ class PDFTextExtractor:
         reader = PdfReader(str(self.pdf_path))
         result: dict[int, str] = {}
         pdfium_document = None
+        ocr_api = None
         plumber_document = None
         if self.mode != "ocr" and (self.exclude_tables or self.exclude_images):
             try:
@@ -215,11 +218,20 @@ class PDFTextExtractor:
                             diagnostic["excluded_tables"] = len(regions)
                             ocr_image = mask_regions(page_image, regions)
                         try:
-                            raw_text = pytesseract.image_to_string(
-                                ocr_image,
-                                lang=self.ocr_language,
-                                config=f"--psm {self.ocr_psm}",
-                            )
+                            if DATA.is_dir() and not self.tesseract_cmd:
+                                from tesserocr import PyTessBaseAPI
+                                if ocr_api is None:
+                                    ocr_api = PyTessBaseAPI(path=str(DATA), lang=self.ocr_language, psm=self.ocr_psm)
+                                    missing = set(self.ocr_language.split("+")) - set(ocr_api.GetLoadedLanguages())
+                                    if missing:
+                                        raise RuntimeError("OCR言語データが不足しています: " + ", ".join(sorted(missing)))
+                                ocr_api.SetImage(ocr_image)
+                                raw_text = ocr_api.GetUTF8Text()
+                            else:
+                                pytesseract.pytesseract.tesseract_cmd = self.tesseract_cmd or "tesseract"
+                                raw_text = pytesseract.image_to_string(
+                                    ocr_image, lang=self.ocr_language, config=f"--psm {self.ocr_psm}",
+                                )
                         except pytesseract.TesseractNotFoundError as exc:
                             raise RuntimeError(
                                 "Tesseract OCRが見つかりません。設定画面でtesseract.exeを指定してください。"
@@ -270,6 +282,8 @@ class PDFTextExtractor:
                         f"{page_index + 1}ページ ({method}{suffix})",
                     )
         finally:
+            if ocr_api is not None:
+                ocr_api.End()
             if plumber_document is not None:
                 plumber_document.close()
             if pdfium_document is not None:

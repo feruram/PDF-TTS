@@ -23,10 +23,9 @@ Style-Bert-VITS2でWAV音声を作る機能を1つのGUIにまとめたツール
 1. `setup_autopdf.bat` をダブルクリックしてPython依存パッケージを導入します。
 2. `start_autopdf.bat` をダブルクリックします。
 
-画像だけのPDFを読む場合は、別途Tesseract OCRと日本語言語データが必要です。
-Windows版Tesseractを導入し、GUIの「Tesseract」欄で `tesseract.exe` を指定してください。
-横書きはOCR言語 `jpn`、縦書き用言語データも導入した場合は `jpn_vert` または
-`jpn+jpn_vert` を指定できます。
+Windowsではセットアップ時にTesseractエンジンと日本語・英語・フランス語の認識データを仮想環境に導入します。
+初回はインターネット接続が必要です。通常は「Tesseract」欄を空欄のまま使い、「OCR言語」は `jpn+eng+fra` を選びます。
+独自のTesseract実行ファイルを指定した場合は、その実行環境にある言語データを使用します。
 
 ## スキャンからPDF
 

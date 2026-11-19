@@ -25,7 +25,7 @@ class PDFTTSJob:
         settings: TTSSettings,
         extraction_mode: str = "auto",
         tesseract_cmd: str = "",
-        ocr_language: str = "jpn",
+        ocr_language: str = "jpn+eng+fra",
         exclude_tables: bool = True,
         exclude_images: bool = True,
         exclude_captions: bool = True,
