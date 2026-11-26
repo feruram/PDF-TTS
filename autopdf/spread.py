@@ -20,25 +20,19 @@ def prepare_browser_input(point=None, browser=None):
             return win32gui.GetForegroundWindow()
         return win32gui.GetAncestor(win32gui.WindowFromPoint(point), win32con.GA_ROOT)
 
-    hwnd = browser or target()
+    hwnd = target()
+    if browser is not None and hwnd == browser:
+        return browser
     if not hwnd or not win32gui.GetClassName(hwnd).startswith("Chrome_WidgetWin"):
         raise ValueError("操作位置にChromeがありません。教本を前面にして再開してください。")
-    pid = win32process.GetWindowThreadProcessId(hwnd)[1]
-    def dismiss(candidate, _):
-        if (win32gui.IsWindowVisible(candidate)
-                and win32gui.GetClassName(candidate).startswith("Chrome_WidgetWin")
-                and win32process.GetWindowThreadProcessId(candidate)[1] == pid
-                and win32gui.GetWindowText(candidate) in titles):
-            win32gui.PostMessage(candidate, win32con.WM_CLOSE, 0, 0)
-            closed.append(candidate)
-        return True
-
-    closed = []
-    win32gui.EnumWindows(dismiss, None)
-    deadline = time.monotonic() + 1
-    while any(win32gui.IsWindowVisible(w) for w in closed) and time.monotonic() < deadline:
-        time.sleep(.03)
-    hwnd = target()
+    pid = win32process.GetWindowThreadProcessId(browser or hwnd)[1]
+    if (win32gui.GetWindowText(hwnd) in titles
+            and win32process.GetWindowThreadProcessId(hwnd)[1] == pid):
+        win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
+        deadline = time.monotonic() + 1
+        while target() == hwnd and time.monotonic() < deadline:
+            time.sleep(.03)
+        hwnd = target()
     if (not hwnd or not win32gui.GetClassName(hwnd).startswith("Chrome_WidgetWin")
             or win32gui.GetWindowText(hwnd) in titles
             or win32process.GetWindowThreadProcessId(hwnd)[1] != pid
@@ -214,7 +208,7 @@ def capture_spread(root, name, count, folder, points, actions, confirm, report,
         if index == 0 and count > 1:
             confirm("最初のページ番号と画質を確認してください。", path)
         if slot == 1 and index+1 < count:
-            if stop.wait(.8):
+            if stop.is_set():
                 raise ScanCancelled()
             for action in actions:
                 params = action.params
