@@ -6,6 +6,7 @@ from queue import Empty, Queue
 from pathlib import Path
 from tkinter import StringVar, filedialog, ttk
 
+from .spread import capture_spread
 from .emulator import capture_emulator
 from .existing_tab import capture_existing, scan_folder
 
@@ -39,7 +40,7 @@ class ChromeFrame(ttk.Frame):
             field.grid(row=row+1, column=1, sticky="ew", padx=8)
         self.mode = StringVar(value="開いているタブ")
         modes = ttk.Combobox(self, state="readonly", textvariable=self.mode,
-                             values=("開いているタブ", "専用Chromeを開く", "Androidエミュレーター"))
+                             values=("開いているタブ", "専用Chromeを開く", "Androidエミュレーター", "見開きの画像を保存"))
         modes.grid(row=0, column=1, sticky="ew")
         ttk.Label(self, text="撮影方法").grid(row=0, column=0, sticky="w")
         self.existing = ttk.Frame(self)
@@ -68,11 +69,25 @@ class ChromeFrame(ttk.Frame):
         swipe = ttk.Combobox(self.existing, state="readonly", textvariable=self.direction,
                              values=("左へスワイプ", "右へスワイプ"))
         swipe.grid(row=3, column=1, sticky="w")
+        spread_box = ttk.Frame(self.existing)
+        spread_box.grid(row=3, columnspan=3, sticky="w")
+        self.menu_item = StringVar(value="")
+        self.spread_points = {}
+        for i in range(2):
+            label = StringVar(value=f"{i+1}ページ目の位置を指定")
+            def pick(i=i, label=label):
+                def selected(point):
+                    self.spread_points[i] = point
+                    label.set(f"{i+1}ページ目 {point}")
+                self.winfo_toplevel().scanner._pick_on_screen(point=True, apply_selection=selected)
+            ttk.Button(spread_box, textvariable=label, command=pick).pack(side="left")
+        ttk.Label(spread_box, text="画像保存に届く↓キーの回数").pack(side="left")
+        ttk.Entry(spread_box, width=4, textvariable=self.menu_item).pack(side="left")
         def show_saved(*_):
             name = self.name.get().strip()
             if name:
                 root = self.root / "output"
-                job = scan_folder(root / "android" if self.mode.get() == "Androidエミュレーター" else root, name)
+                job = scan_folder(root / "android" if self.mode.get() == "Androidエミュレーター" else root / "spread" if self.mode.get() == "見開きの画像を保存" else root, name)
                 saved = sum(1 for _ in job.glob("page-*.png"))
                 self.resume_info.set(f"保存済み {saved} 枚　次の保存番号 {saved+1}" if saved else "新規撮影（保存済み0枚）")
             else:
@@ -81,9 +96,15 @@ class ChromeFrame(ttk.Frame):
         self.refresh_saved = show_saved
         def show_mode(*_):
             android = self.mode.get() == "Androidエミュレーター"
-            active = android or self.mode.get() == "開いているタブ"
+            spread = self.mode.get() == "見開きの画像を保存"
+            active = spread or android or self.mode.get() == "開いているタブ"
             for widget in desktop_fields:
                 widget.grid_remove() if android else widget.grid()
+            if spread:
+                for widget in desktop_fields:
+                    if int(widget.grid_info().get("row", 0)) not in (1,6):
+                        widget.grid_remove()
+            spread_box.grid() if spread else spread_box.grid_remove()
             swipe.grid() if android else swipe.grid_remove()
             show_saved()
             for row in (1, 3, 4):
@@ -155,7 +176,7 @@ class ChromeFrame(ttk.Frame):
         except ValueError:
             self.status.set("保存サイズは正の整数で指定してください（例：1400x2000、最大約8900万画素）。")
             return
-        self.use_existing = self.mode.get() == "開いているタブ"
+        self.use_existing = self.mode.get() in ("開いているタブ", "見開きの画像を保存")
         if self.mode.get() == "Androidエミュレーター":
             name = self.name.get().strip()
             if not name:
@@ -163,6 +184,19 @@ class ChromeFrame(ttk.Frame):
                 return
             task = capture_emulator
             args = (name, count, self.direction.get())
+        elif self.mode.get() == "見開きの画像を保存":
+            name = self.name.get().strip()
+            folder = Path(self.folder.get())
+            actions = list(self.winfo_toplevel().scanner.actions)
+            try:
+                item = int(self.menu_item.get())
+                if not (1 <= item <= 50 and name and folder.is_dir() and len(self.spread_points)==2 and (actions or count<=2)):
+                    raise ValueError()
+            except ValueError:
+                self.status.set("資料名・保存先・左右の位置・↓キーの回数・ページ送りを確認してください。")
+                return
+            task = capture_spread
+            args = (name, count, folder, self.spread_points.copy(), item, actions)
         elif self.use_existing:
             name = self.name.get().strip()
             folder = Path(self.folder.get())
