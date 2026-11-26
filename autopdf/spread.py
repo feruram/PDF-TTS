@@ -30,9 +30,28 @@ def image_save_item():
         return None
     _, pid = win32process.GetWindowThreadProcessId(hwnd)
     labels = {"名前を付けて画像を保存", "画像に名前を付けて保存", "save image as"}
-    desktop = Desktop(backend="uia")
-    for window in desktop.windows(process=pid, visible_only=True):
-        for item in window.descendants(control_type="MenuItem"):
+    from pywinauto.uia_defines import IUIA
+    from pywinauto.uia_element_info import UIAElementInfo
+    from pywinauto.controls.uiawrapper import UIAWrapper
+    uia = IUIA()
+    api = uia.iuia
+    kind = api.CreatePropertyCondition(uia.UIA_dll.UIA_ControlTypePropertyId,
+                                       uia.UIA_dll.UIA_MenuItemControlTypeId)
+    names = ("名前を付けて画像を保存(V)…", "名前を付けて画像を保存…",
+             "Save image as…", "Save image as...", "Save image as")
+    match = None
+    for label in names:
+        condition = api.CreatePropertyCondition(uia.UIA_dll.UIA_NamePropertyId, label)
+        match = condition if match is None else api.CreateOrCondition(match, condition)
+    target = api.ElementFromHandle(hwnd).FindFirst(4, api.CreateAndCondition(kind, match))
+    if target:
+        windows_items = [[UIAWrapper(UIAElementInfo(target))]]
+    else:
+        # Other localized accelerator spellings and detached menus.
+        windows_items = (w.descendants(control_type="MenuItem") for w in
+                         Desktop(backend="uia").windows(process=pid, visible_only=True))
+    for items in windows_items:
+        for item in items:
             name = item.window_text().lower().split("\t")[0].rstrip("…. ").replace("&", "")
             name = re.sub(r"\([a-z]\)$", "", name)
             if name not in labels or not item.is_enabled() or not item.is_visible():
@@ -121,7 +140,7 @@ def capture_spread(root, name, count, folder, points, actions, confirm, report,
             for attempt in range(2):
                 close_download_popup()
                 pyautogui.click(*points[slot], button="right")
-                if stop.wait(.4):
+                if stop.wait(.05):
                     raise ScanCancelled()
                 menu_item = image_save_item()
                 if menu_item is not None:
