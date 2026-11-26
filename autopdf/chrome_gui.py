@@ -71,7 +71,6 @@ class ChromeFrame(ttk.Frame):
         swipe.grid(row=3, column=1, sticky="w")
         spread_box = ttk.Frame(self.existing)
         spread_box.grid(row=3, columnspan=3, sticky="w")
-        self.menu_item = StringVar(value="")
         self.spread_points = {}
         for i in range(2):
             label = StringVar(value=f"{i+1}ページ目の位置を指定")
@@ -81,8 +80,6 @@ class ChromeFrame(ttk.Frame):
                     label.set(f"{i+1}ページ目 {point}")
                 self.winfo_toplevel().scanner._pick_on_screen(point=True, apply_selection=selected)
             ttk.Button(spread_box, textvariable=label, command=pick).pack(side="left")
-        ttk.Label(spread_box, text="画像保存に届く↓キーの回数").pack(side="left")
-        ttk.Entry(spread_box, width=4, textvariable=self.menu_item).pack(side="left")
         def show_saved(*_):
             name = self.name.get().strip()
             if name:
@@ -189,14 +186,13 @@ class ChromeFrame(ttk.Frame):
             folder = Path(self.folder.get())
             actions = list(self.winfo_toplevel().scanner.actions)
             try:
-                item = int(self.menu_item.get())
-                if not (1 <= item <= 50 and name and folder.is_dir() and len(self.spread_points)==2 and (actions or count<=2)):
+                if not (name and folder.is_dir() and len(self.spread_points)==2 and (actions or count<=2)):
                     raise ValueError()
             except ValueError:
-                self.status.set("資料名・保存先・左右の位置・↓キーの回数・ページ送りを確認してください。")
+                self.status.set("資料名・保存先・左右の位置・ページ送りを確認してください。")
                 return
             task = capture_spread
-            args = (name, count, folder, self.spread_points.copy(), item, actions)
+            args = (name, count, folder, self.spread_points.copy(), actions)
         elif self.use_existing:
             name = self.name.get().strip()
             folder = Path(self.folder.get())

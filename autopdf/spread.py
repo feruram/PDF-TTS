@@ -1,5 +1,6 @@
 """Save each side of a spread with the viewer's image download menu."""
 import ctypes
+import re
 import time
 
 from PIL import Image
@@ -7,6 +8,41 @@ from PIL import Image
 from .chrome_capture import assemble
 from .existing_tab import scan_folder
 from .scanner import ScanCancelled, execute_action
+
+
+def close_download_popup():
+    import win32gui
+    import pyautogui
+    hwnd = win32gui.GetForegroundWindow()
+    if win32gui.GetClassName(hwnd).startswith("Chrome_WidgetWin") and win32gui.GetWindowText(hwnd) in (
+        "最近のダウンロード履歴", "Recent downloads", "Recent download history",
+    ):
+        pyautogui.press("esc")
+        time.sleep(.3)
+
+
+def image_save_item():
+    import win32gui
+    import win32process
+    from pywinauto import Desktop
+    hwnd = win32gui.GetForegroundWindow()
+    if not win32gui.GetClassName(hwnd).startswith("Chrome_WidgetWin"):
+        return None
+    _, pid = win32process.GetWindowThreadProcessId(hwnd)
+    labels = {"名前を付けて画像を保存", "画像に名前を付けて保存", "save image as"}
+    desktop = Desktop(backend="uia")
+    for window in desktop.windows(process=pid, visible_only=True):
+        for item in window.descendants(control_type="MenuItem"):
+            name = item.window_text().lower().split("\t")[0].rstrip("…. ").replace("&", "")
+            name = re.sub(r"\([a-z]\)$", "", name)
+            if name not in labels or not item.is_enabled() or not item.is_visible():
+                continue
+            parent = item.parent()
+            while parent and parent.element_info.control_type not in ("Document", "Window"):
+                parent = parent.parent()
+            if parent and parent.element_info.control_type != "Document":
+                return item
+    return None
 
 
 def versions(folder):
@@ -45,10 +81,10 @@ def wait_image(folder, before, stop):
             if title.value in ("名前を付けて保存", "Save As"):
                 pyautogui.press("enter")
                 accepted = True
-    raise ValueError("画像が届きません。保存先と右クリックメニューの項目番号を確認してください。")
+    raise ValueError("画像が届きません。保存先とChromeの保存ダイアログを確認してください。")
 
 
-def capture_spread(root, name, count, folder, points, item, actions, confirm, report,
+def capture_spread(root, name, count, folder, points, actions, confirm, report,
                    stop, delay, select_area, output_size):
     import pyautogui
     job = scan_folder(root / "spread", name)
@@ -62,15 +98,32 @@ def capture_spread(root, name, count, folder, points, item, actions, confirm, re
         if stop.is_set():
             raise ScanCancelled()
         before = versions(folder)
-        pyautogui.click(*points[index % 2], button="right")
-        time.sleep(.35)
-        pyautogui.press("down", presses=item, interval=.08)
-        pyautogui.press("enter")
+        import pythoncom
+        pythoncom.CoInitialize()
+        try:
+            for attempt in range(2):
+                close_download_popup()
+                pyautogui.click(*points[index % 2], button="right")
+                if stop.wait(.4):
+                    raise ScanCancelled()
+                menu_item = image_save_item()
+                if menu_item is not None:
+                    break
+                pyautogui.press("esc")
+                if stop.wait(.6):
+                    raise ScanCancelled()
+            if menu_item is None:
+                pyautogui.press("esc")
+                raise ValueError(f"{index+1}枚目の位置で「名前を付けて画像を保存」が見つかりません。"
+                                 "DevToolsを右に表示し、端末エミュレーションをオフにして、本文内の位置を再指定してください。")
+            menu_item.invoke()
+        finally:
+            pythoncom.CoUninitialize()
         page = wait_image(folder, before, stop)
-        if paths:
-            with Image.open(paths[-1]) as last:
+        for earlier in paths[-2:]:
+            with Image.open(earlier) as last:
                 if last.size == page.size and last.convert("RGB").tobytes() == page.tobytes():
-                    raise ValueError("直前と同じ画像です。ページ位置と見開き送りを確認してください。")
+                    raise ValueError("直近の見開きと重複する画像です。ページ位置と見開き送りを確認してください。")
         path = job / f"page-{index+1:04}.png"
         tmp = path.with_suffix(".tmp")
         page.save(tmp, format="PNG")
@@ -80,6 +133,9 @@ def capture_spread(root, name, count, folder, points, item, actions, confirm, re
         if index == 0 and count > 1:
             confirm("最初のページ番号と画質を確認してください。", path)
         if index % 2 and index+1 < count:
+            if stop.wait(.8):
+                raise ScanCancelled()
+            close_download_popup()
             for action in actions:
                 execute_action(action, stop)
             if stop.wait(delay):
