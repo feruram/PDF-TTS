@@ -963,8 +963,9 @@ class AutoPDFApp(tk.Tk):
         notebook.add(self.scanner, text="  スキャン→PDF  ")
         from .chrome_gui import ChromeFrame
         self.chrome = ChromeFrame(notebook, project_root)
-        notebook.add(self.chrome, text="  Chrome高解像度スキャン  ")
+        notebook.add(self.chrome, text="  ページ画像保存・Chromeスキャン  ")
         notebook.add(self.tts, text="  PDF→Style-Bert-VITS2  ")
+        notebook.select(self.chrome)
         self.scanner.refresh_profile_names()
         selected = ui.get("scan_profile")
         profile = self.profiles.get(selected) or next(iter(self.profiles.values()))

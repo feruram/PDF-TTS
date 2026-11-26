@@ -39,7 +39,7 @@ class ChromeFrame(ttk.Frame):
                                   values=("Right", "Left", "PageDown", "click"))
                      if var is self.key else ttk.Entry(self, textvariable=var))
             field.grid(row=row+1, column=1, sticky="ew", padx=8)
-        self.mode = StringVar(value="開いているタブ")
+        self.mode = StringVar(value="見開きの画像を保存")
         modes = ttk.Combobox(self, state="readonly", textvariable=self.mode,
                              values=("開いているタブ", "専用Chromeを開く", "Androidエミュレーター", "見開きの画像を保存"))
         modes.grid(row=0, column=1, sticky="ew")
@@ -107,6 +107,11 @@ class ChromeFrame(ttk.Frame):
                         widget.grid_remove()
             spread_box.grid() if spread else spread_box.grid_remove()
             swipe.grid() if android else swipe.grid_remove()
+            if spread:
+                size_box.pack_forget()
+            else:
+                size_box.pack(side="left", before=bar.winfo_children()[1])
+            self.start.configure(text="画像保存を開始" if spread else "スキャン開始")
             show_saved()
             for row in (1, 3, 4):
                 for widget in self.grid_slaves(row=row):
@@ -120,12 +125,12 @@ class ChromeFrame(ttk.Frame):
                     widget.grid()
         self.manual_fields = [w for row in (1, 3, 4) for w in self.grid_slaves(row=row)]
         self.mode.trace_add("write", show_mode)
-        show_mode()
         bar = ttk.Frame(self)
         bar.grid(row=6, columnspan=2, sticky="w", pady=10)
         self.output_size = StringVar(value="1400x2000")
-        ttk.Label(bar, text="保存サイズ（px）").pack(side="left")
-        ttk.Entry(bar, width=12, textvariable=self.output_size).pack(side="left", padx=4)
+        size_box = ttk.Frame(bar)
+        ttk.Label(size_box, text="保存サイズ（px）").pack(side="left")
+        ttk.Entry(size_box, width=12, textvariable=self.output_size).pack(side="left", padx=4)
         self.delay = StringVar(value="1.0")
         ttk.Label(bar, text="ページ送り後の待機（秒）").pack(side="left")
         ttk.Entry(bar, width=6, textvariable=self.delay).pack(side="left", padx=4)
@@ -134,6 +139,7 @@ class ChromeFrame(ttk.Frame):
         self.cancel = ttk.Button(bar, text="中断", command=self.stop.set, state="disabled")
         for button in (self.start, self.next, self.cancel):
             button.pack(side="left", padx=3)
+        show_mode()
         self.status = StringVar()
         ttk.Label(self, textvariable=self.status, wraplength=760).grid(row=7, columnspan=2, sticky="w")
         self.preview = ttk.Label(self)
@@ -171,7 +177,8 @@ class ChromeFrame(ttk.Frame):
             self.status.set("ページ送り後の待機は0～86400秒で入力してください。")
             return
         try:
-            width, height = map(int, self.output_size.get().lower().replace("×", "x").split("x"))
+            width, height = ((1400, 2000) if self.mode.get() == "見開きの画像を保存" else
+                             map(int, self.output_size.get().lower().replace("×", "x").split("x")))
             if min(width, height) < 1 or width * height > Image.MAX_IMAGE_PIXELS:
                 raise ValueError()
         except ValueError:
