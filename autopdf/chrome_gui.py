@@ -6,6 +6,7 @@ from queue import Empty, Queue
 from pathlib import Path
 from tkinter import StringVar, filedialog, ttk
 
+from .emulator import capture_emulator
 from .existing_tab import capture_existing, scan_folder
 
 from PIL import Image, ImageTk
@@ -38,7 +39,7 @@ class ChromeFrame(ttk.Frame):
             field.grid(row=row+1, column=1, sticky="ew", padx=8)
         self.mode = StringVar(value="開いているタブ")
         modes = ttk.Combobox(self, state="readonly", textvariable=self.mode,
-                             values=("開いているタブ", "専用Chromeを開く"))
+                             values=("開いているタブ", "専用Chromeを開く", "Androidエミュレーター"))
         modes.grid(row=0, column=1, sticky="ew")
         ttk.Label(self, text="撮影方法").grid(row=0, column=0, sticky="w")
         self.existing = ttk.Frame(self)
@@ -62,10 +63,16 @@ class ChromeFrame(ttk.Frame):
         ttk.Label(self.existing, text="ページ送りは「スキャン→PDF」で編集中の操作列を使用します。").grid(row=6, columnspan=3)
         self.resume_info = StringVar()
         ttk.Label(self.existing, textvariable=self.resume_info).grid(row=7, columnspan=3, sticky="w")
+        desktop_fields = [w for w in self.existing.grid_slaves() if int(w.grid_info()["row"]) in (1,2,4,5,6)]
+        self.direction = StringVar(value="左へスワイプ")
+        swipe = ttk.Combobox(self.existing, state="readonly", textvariable=self.direction,
+                             values=("左へスワイプ", "右へスワイプ"))
+        swipe.grid(row=3, column=1, sticky="w")
         def show_saved(*_):
             name = self.name.get().strip()
             if name:
-                job = scan_folder(self.root / "output", name)
+                root = self.root / "output"
+                job = scan_folder(root / "android" if self.mode.get() == "Androidエミュレーター" else root, name)
                 saved = sum(1 for _ in job.glob("page-*.png"))
                 self.resume_info.set(f"保存済み {saved} 枚　次の保存番号 {saved+1}" if saved else "新規撮影（保存済み0枚）")
             else:
@@ -73,7 +80,12 @@ class ChromeFrame(ttk.Frame):
         self.name.trace_add("write", show_saved)
         self.refresh_saved = show_saved
         def show_mode(*_):
-            active = self.mode.get() == "開いているタブ"
+            android = self.mode.get() == "Androidエミュレーター"
+            active = android or self.mode.get() == "開いているタブ"
+            for widget in desktop_fields:
+                widget.grid_remove() if android else widget.grid()
+            swipe.grid() if android else swipe.grid_remove()
+            show_saved()
             for row in (1, 3, 4):
                 for widget in self.grid_slaves(row=row):
                     if active:
@@ -144,7 +156,14 @@ class ChromeFrame(ttk.Frame):
             self.status.set("保存サイズは正の整数で指定してください（例：1400x2000、最大約8900万画素）。")
             return
         self.use_existing = self.mode.get() == "開いているタブ"
-        if self.use_existing:
+        if self.mode.get() == "Androidエミュレーター":
+            name = self.name.get().strip()
+            if not name:
+                self.status.set("資料名を入力してください。")
+                return
+            task = capture_emulator
+            args = (name, count, self.direction.get())
+        elif self.use_existing:
             name = self.name.get().strip()
             folder = Path(self.folder.get())
             actions = list(self.winfo_toplevel().scanner.actions)
