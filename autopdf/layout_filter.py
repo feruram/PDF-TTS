@@ -200,7 +200,7 @@ class OllamaContentFilter:
     ) -> tuple[str, list[str]]:
         if not self.model:
             raise ValueError("Ollamaモデル名を指定してください。")
-        content = self.SYSTEM_PROMPT + "\n\nOCRまたはPDF抽出本文:\n" + source_text
+        content = "次の抽出テキストから、表題・列見出し・表内の行を取り除き、本文を返してください。\n" + source_text
         message: dict[str, Any] = {"role": "user", "content": content}
         if page_image is not None:
             buffer = io.BytesIO()
@@ -210,11 +210,13 @@ class OllamaContentFilter:
             message["images"] = [base64.b64encode(buffer.getvalue()).decode("ascii")]
         payload = {
             "model": self.model,
-            "messages": [message],
+            "messages": [{"role": "system", "content": self.SYSTEM_PROMPT}, message],
             "stream": False,
             "format": self.RESPONSE_SCHEMA,
             "options": {"temperature": 0},
         }
+        if self.model == "qwen3.5:2b":
+            payload["think"] = False
         response = self._request("/api/chat", payload)
         raw_content = response.get("message", {}).get("content", "")
         try:

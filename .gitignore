@@ -10,6 +10,7 @@ autopdf_settings.json
 /lack/
 /output*/
 /tmp/
+/release/AutoPDF-Windows-x64-Qwen.zip
 .gradle/
 build/
 local.properties

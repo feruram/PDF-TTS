@@ -11,6 +11,7 @@ from tkinter.scrolledtext import ScrolledText
 
 from .config import ConfigStore
 from .layout_filter import OllamaContentFilter
+from .portable_ollama import bundle_directory, use_bundle
 from .models import PageTurnAction, ScanProfile, TTSSettings
 from .scanner import PageTurnRecorder, ScanCancelled, ScanEngine, execute_action
 from .sbv2 import ModelInfo, StyleBertVITS2Client
@@ -522,7 +523,7 @@ class TTSFrame(ttk.Frame):
         self.exclude_tables = tk.BooleanVar(value=ui.get("exclude_tables", True))
         self.exclude_images = tk.BooleanVar(value=ui.get("exclude_images", True))
         self.exclude_captions = tk.BooleanVar(value=ui.get("exclude_captions", True))
-        self.use_ollama = tk.BooleanVar(value=ui.get("use_ollama", False))
+        self.use_ollama = tk.BooleanVar(value=ui.get("use_ollama", bundle_directory().is_dir()))
         self.ollama_url = tk.StringVar(
             value=ui.get("ollama_url", "http://127.0.0.1:11434")
         )
@@ -702,6 +703,10 @@ class TTSFrame(ttk.Frame):
 
     def load_ollama_models(self) -> None:
         if self.running:
+            return
+        if use_bundle(self.ollama_url.get().strip(), self.ollama_model.get().strip()):
+            self._ollama_models_loaded(["qwen3.5:2b"], None)
+            self.status.set("同梱のQwen3.5-2Bを使用します。")
             return
         self.running = True
         self.status.set("Ollamaへ接続しています…")

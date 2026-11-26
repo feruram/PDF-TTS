@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import re
+from contextlib import ExitStack
 from collections.abc import Callable
 from pathlib import Path
 
 from .ocr_setup import DATA, LANGUAGES
+from .portable_ollama import open_filter
 
 from .layout_filter import (
-    OllamaContentFilter,
     detect_table_regions,
     mask_regions,
     remove_caption_lines,
@@ -156,11 +157,8 @@ class PDFTextExtractor:
                 plumber_document = pdfplumber.open(str(self.pdf_path))
             except ImportError as exc:
                 raise RuntimeError("レイアウト除外には pdfplumber が必要です。") from exc
-        ollama = (
-            OllamaContentFilter(self.ollama_url, self.ollama_model)
-            if self.use_ollama
-            else None
-        )
+        resources = ExitStack()
+        ollama = None
         try:
             for position, page_index in enumerate(page_indices, start=1):
                 if should_stop and should_stop():
@@ -191,7 +189,7 @@ class PDFTextExtractor:
                     self.mode == "auto" and len(text) < 10
                 )
                 page_image = None
-                if needs_ocr or ollama is not None:
+                if needs_ocr or self.use_ollama:
                     if pdfium_document is None:
                         try:
                             import pypdfium2 as pdfium
@@ -250,7 +248,7 @@ class PDFTextExtractor:
                         r"(?im)^\s*(?:図|表|写真|fig(?:ure)?\.?|table)\s*[\d０-９]", candidate
                     )) or sum(bool(re.search(r"\S(?:\s{2,}|\t)\S|\d+\s+\d+\s+\d+", line))
                               for line in candidate.splitlines()) >= 2
-                    if ollama and needs_ocr and page_image and not complex_layout:
+                    if self.use_ollama and needs_ocr and page_image and not complex_layout:
                         # Dense shaded patches are typical of photographs and diagrams.
                         from PIL import ImageStat
                         thumb = page_image.convert("L").resize((96, 96))
@@ -259,7 +257,11 @@ class PDFTextExtractor:
                             for x in range(0,96,12) for y in range(0,96,12)
                         )
                     diagnostic["complex_layout"] = complex_layout
-                    if ollama is not None and text and complex_layout:
+                    if self.use_ollama and text and complex_layout:
+                        if ollama is None:
+                            if progress:
+                                progress(position - 1, len(page_indices), "Qwenを準備しています…")
+                            ollama = resources.enter_context(open_filter(self.ollama_url, self.ollama_model))
                         text, removed = ollama.filter_body_text(text, page_image)
                         diagnostic["ollama_removed"] = removed
                         method += "+Ollama"
@@ -282,6 +284,7 @@ class PDFTextExtractor:
                         f"{page_index + 1}ページ ({method}{suffix})",
                     )
         finally:
+            resources.close()
             if ocr_api is not None:
                 ocr_api.End()
             if plumber_document is not None:

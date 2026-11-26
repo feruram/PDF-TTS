@@ -2,7 +2,9 @@
 
 ## Windows版のダウンロードと起動
 
-[最新のReleaseからWindows版をダウンロード](https://github.com/feruram/PDF-TTS/releases/latest/download/AutoPDF.exe)。Windows x64用です。AutoPDF.exe を書き込み可能な専用フォルダに置いてダブルクリックします。Pythonのセットアップは不要です。初回起動は展開に時間がかかります。設定と output フォルダはexeと同じ場所に作成されます。更新時はアプリを終了し、同じ場所のexeを入れ替えてください。
+**[Windows x64版をダウンロード（Ollama・Qwen同梱ZIP）](https://github.com/feruram/PDF-TTS/releases/latest/download/AutoPDF-Windows-x64-Qwen.zip)**。ZIPを右クリックして「すべて展開」を選び、展開先の `AutoPDF.exe` を起動します。隣の `qwen` フォルダにCPU用Ollama、Qwen3.5-2Bの重み、画像判定用のモデルが入っています。PDFのスキャン・OCR・Qwen解析はPC上でオフラインで使えます。音声合成には下記のStyle-Bert-VITS2環境と話者モデルを使います。
+
+更新時はアプリを終了し、既存の `output` と設定ファイルがあるフォルダに展開します。スキャンとOCRのみを使う場合は、[軽量版のAutoPDF.exe](https://github.com/feruram/PDF-TTS/releases/latest/download/AutoPDF.exe)も選べます。
 
 ### Chromeの見開き画像をPDFに保存する
 
@@ -20,8 +22,7 @@
 
 ### モバイル再生
 
-PCで `ollama pull qwen3.5:2b` を一度実行し、「難しいページだけQwenで判定」を
-有効にします。図表番号、列状の文字配置、スキャン画像の濃い領域を手掛かりに、
+同梱版では「PDF→Style-Bert-VITS2」で「難しいページだけQwenで判定」を選び、「PDF解析」を押します。初期設定では有効です。最初の候補ページでOllamaを起動し、解析終了時に閉じます。図表番号、列状の文字配置、スキャン画像の濃い領域を手掛かりに、
 候補ページだけを推論します。解析結果は合成前にプレビューで修正できます。
 
 変換後の `.autobook` を端末のローカルストレージにコピーし、プレイヤーの
@@ -92,8 +93,7 @@ DevToolsのコマンドメニューで英語の Capture screenshot が選択で�
 4. 「読み上げ除外」で表、画像・図内文字、図表キャプションを選びます。
    - テキストPDFでは表と埋め込み画像の座標に重なる文字を除外します。
    - 画像PDFではOpenCVで罫線表を検出し、白塗りしてからOCRします。
-   - 図中文字まで高精度に避けたい場合はOllamaを起動し、「Ollamaで本文判定」を
-     有効にして視覚モデルを選択します。Ollamaは任意機能です。
+   - 「難しいページだけQwenで判定」で、候補ページの画像と抽出本文を同梱のQwen3.5-2B（Q4_K_M）に渡します。
 5. 「接続・モデル取得」を押し、Style-Bert-VITS2のモデル・話者・スタイルを選びます。
 6. 「PDF解析」で抽出内容を確認します。プレビュー内の本文は修正できますが、
    `=== 1ページ ===` のようなページ見出しは残してください。
