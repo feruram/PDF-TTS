@@ -9,15 +9,42 @@ from .existing_tab import scan_folder
 from .scanner import ScanCancelled, execute_action
 
 
-def close_download_popup():
+def prepare_browser_input(point=None, browser=None):
+    import win32con
     import win32gui
-    import pyautogui
-    hwnd = win32gui.GetForegroundWindow()
-    if win32gui.GetClassName(hwnd).startswith("Chrome_WidgetWin") and win32gui.GetWindowText(hwnd) in (
-        "最近のダウンロード履歴", "Recent downloads", "Recent download history",
-    ):
-        pyautogui.press("esc")
-        time.sleep(.3)
+    import win32process
+
+    titles = {"最近のダウンロード履歴", "Recent downloads", "Recent download history"}
+    def target():
+        if point is None:
+            return win32gui.GetForegroundWindow()
+        return win32gui.GetAncestor(win32gui.WindowFromPoint(point), win32con.GA_ROOT)
+
+    hwnd = browser or target()
+    if not hwnd or not win32gui.GetClassName(hwnd).startswith("Chrome_WidgetWin"):
+        raise ValueError("操作位置にChromeがありません。教本を前面にして再開してください。")
+    pid = win32process.GetWindowThreadProcessId(hwnd)[1]
+    def dismiss(candidate, _):
+        if (win32gui.IsWindowVisible(candidate)
+                and win32gui.GetClassName(candidate).startswith("Chrome_WidgetWin")
+                and win32process.GetWindowThreadProcessId(candidate)[1] == pid
+                and win32gui.GetWindowText(candidate) in titles):
+            win32gui.PostMessage(candidate, win32con.WM_CLOSE, 0, 0)
+            closed.append(candidate)
+        return True
+
+    closed = []
+    win32gui.EnumWindows(dismiss, None)
+    deadline = time.monotonic() + 1
+    while any(win32gui.IsWindowVisible(w) for w in closed) and time.monotonic() < deadline:
+        time.sleep(.03)
+    hwnd = target()
+    if (not hwnd or not win32gui.GetClassName(hwnd).startswith("Chrome_WidgetWin")
+            or win32gui.GetWindowText(hwnd) in titles
+            or win32process.GetWindowThreadProcessId(hwnd)[1] != pid
+            or (browser is not None and hwnd != browser)):
+        raise ValueError("教本の操作位置が別のウィンドウに隠れています。位置を確認して再開してください。")
+    return hwnd
 
 
 def image_save_item():
@@ -143,6 +170,7 @@ def capture_spread(root, name, count, folder, points, actions, confirm, report,
     if len(paths) < count:
         next_slot = (len(paths) + int(cover)) % 2
         confirm(f"次の保存番号は {len(paths)+1}。位置{next_slot+1}に次のページが来る画面を表示してください。", None)
+    browser = None
     for index in range(len(paths), count):
         if stop.is_set():
             raise ScanCancelled()
@@ -152,7 +180,7 @@ def capture_spread(root, name, count, folder, points, actions, confirm, report,
         pythoncom.CoInitialize()
         try:
             for attempt in range(2):
-                close_download_popup()
+                browser = prepare_browser_input(points[slot], browser)
                 pyautogui.click(*points[slot], button="right")
                 if stop.wait(.05):
                     raise ScanCancelled()
@@ -188,8 +216,15 @@ def capture_spread(root, name, count, folder, points, actions, confirm, report,
         if slot == 1 and index+1 < count:
             if stop.wait(.8):
                 raise ScanCancelled()
-            close_download_popup()
             for action in actions:
+                params = action.params
+                if action.kind in ("click", "double_click") or (action.kind == "scroll" and "x" in params):
+                    prepare_browser_input((int(params["x"]), int(params["y"])), browser)
+                elif action.kind == "drag":
+                    for x, y in (("x1", "y1"), ("x2", "y2")):
+                        prepare_browser_input((int(params[x]), int(params[y])), browser)
+                elif action.kind != "wait":
+                    prepare_browser_input(browser=browser)
                 execute_action(action, stop)
             if stop.wait(delay):
                 raise ScanCancelled()
