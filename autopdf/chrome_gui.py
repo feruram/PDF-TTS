@@ -1,3 +1,4 @@
+from functools import partial
 import math
 import os
 import tkinter as tk
@@ -71,9 +72,12 @@ class ChromeFrame(ttk.Frame):
         swipe.grid(row=3, column=1, sticky="w")
         spread_box = ttk.Frame(self.existing)
         spread_box.grid(row=3, columnspan=3, sticky="w")
+        self.spread_start = StringVar(value="見開きから")
+        ttk.Combobox(spread_box, state="readonly", width=18, textvariable=self.spread_start,
+                     values=("見開きから", "表紙1枚から")).pack(side="left")
         self.spread_points = {}
         for i in range(2):
-            label = StringVar(value=f"{i+1}ページ目の位置を指定")
+            label = StringVar(value=f"位置{i+1}を指定")
             def pick(i=i, label=label):
                 def selected(point):
                     self.spread_points[i] = point
@@ -186,12 +190,12 @@ class ChromeFrame(ttk.Frame):
             folder = Path(self.folder.get())
             actions = list(self.winfo_toplevel().scanner.actions)
             try:
-                if not (name and folder.is_dir() and len(self.spread_points)==2 and (actions or count<=2)):
+                if not (name and folder.is_dir() and len(self.spread_points)==2 and (actions or count <= (1 if self.spread_start.get() == "表紙1枚から" else 2))):
                     raise ValueError()
             except ValueError:
                 self.status.set("資料名・保存先・左右の位置・ページ送りを確認してください。")
                 return
-            task = capture_spread
+            task = partial(capture_spread, cover=self.spread_start.get() == "表紙1枚から")
             args = (name, count, folder, self.spread_points.copy(), actions)
         elif self.use_existing:
             name = self.name.get().strip()

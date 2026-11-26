@@ -85,25 +85,42 @@ def wait_image(folder, before, stop):
 
 
 def capture_spread(root, name, count, folder, points, actions, confirm, report,
-                   stop, delay, select_area, output_size):
+                   stop, delay, select_area, output_size, *, cover=False):
     import pyautogui
     job = scan_folder(root / "spread", name)
     job.mkdir(parents=True, exist_ok=True)
     paths = sorted(job.glob("page-*.png"), key=lambda p: int(p.stem[5:]))
     if len(paths) > count or any(p.name != f"page-{i:04}.png" for i,p in enumerate(paths,1)):
         raise ValueError("保存枚数と連番を確認してください。")
+    # Old jobs always started with both pages of a spread.
+    layout = job / "spread-layout.txt"
+    if layout.exists():
+        saved = layout.read_text(encoding="ascii").strip()
+        if saved not in ("cover", "pair"):
+            raise ValueError("保存済み資料の表紙設定を確認してください。")
+        cover = saved == "cover"
+    elif paths:
+        cover = False
+    else:
+        tmp = layout.with_suffix(".tmp")
+        tmp.write_text("cover" if cover else "pair", encoding="ascii")
+        tmp.replace(layout)
+    order = "表紙1枚 → 見開き" if cover else "見開きから"
+    report(f"保存順：{order}")
     if len(paths) < count:
-        confirm(f"次の保存番号は {len(paths)+1}。対象の見開きを表示してください。", None)
+        next_slot = (len(paths) + int(cover)) % 2
+        confirm(f"次の保存番号は {len(paths)+1}。位置{next_slot+1}に次のページが来る画面を表示してください。", None)
     for index in range(len(paths), count):
         if stop.is_set():
             raise ScanCancelled()
+        slot = (index + int(cover)) % 2
         before = versions(folder)
         import pythoncom
         pythoncom.CoInitialize()
         try:
             for attempt in range(2):
                 close_download_popup()
-                pyautogui.click(*points[index % 2], button="right")
+                pyautogui.click(*points[slot], button="right")
                 if stop.wait(.4):
                     raise ScanCancelled()
                 menu_item = image_save_item()
@@ -132,7 +149,7 @@ def capture_spread(root, name, count, folder, points, actions, confirm, report,
         report(f"{index+1}/{count} 枚保存　{page.width}×{page.height} px")
         if index == 0 and count > 1:
             confirm("最初のページ番号と画質を確認してください。", path)
-        if index % 2 and index+1 < count:
+        if slot == 1 and index+1 < count:
             if stop.wait(.8):
                 raise ScanCancelled()
             close_download_popup()
