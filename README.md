@@ -1,5 +1,19 @@
 # AutoPDF 2
 
+## Windows版のダウンロードと起動
+
+[最新のReleaseからWindows版をダウンロード](https://github.com/feruram/PDF-TTS/releases/latest/download/AutoPDF.exe)。Windows x64用です。AutoPDF.exe を書き込み可能な専用フォルダに置いてダブルクリックします。Pythonのセットアップは不要です。初回起動は展開に時間がかかります。設定と output フォルダはexeと同じ場所に作成されます。更新時はアプリを終了し、同じ場所のexeを入れ替えてください。
+
+### Chromeの見開き画像をPDFに保存する
+
+1. Chromeで資料を開き、左右の本文を右クリックして「名前を付けて画像を保存」が表示される位置を確認します。
+2. AutoPDFの「スキャン→PDF」で1回分のページ送りを記録し、F8で終了します。
+3. 「ページ画像保存・Chromeスキャン」で「見開きの画像を保存」を選び、資料名、総枚数、Chromeのダウンロード先を入力します。位置1・2は見開きの読み順に、オーバーレイ上でF8を押して登録します。
+4. 右側の表紙から始まる本は「表紙1枚から」を選択し、位置1を左、位置2を右にします。表紙に戻して「画像保存を開始」を押します。
+5. はじめの画像を確認して続行します。指定枚数に達すると、完了画面に表示された保存先に book.pdf ができます。再開は同じ資料名・同じ総枚数で、次の未保存ページを表示して行います。
+
+以前のソース版で撮影中の資料を引き継ぐには、既存の output があるプロジェクトフォルダにexeを置きます。
+
 ### モバイル再生
 
 PCで `ollama pull qwen3.5:2b` を一度実行し、「難しいページだけQwenで判定」を
@@ -18,7 +32,7 @@ Style-Bert-VITS2でWAV音声を作る機能を1つのGUIにまとめたツール
 既存の `autoPDF.py`、`folderToPdf.py`、`mousePointer.py` はそのまま残しています。
 新しい実装の入口は `autopdf_app.py` です。
 
-## セットアップと起動
+## ソースコードから起動する場合
 
 1. `setup_autopdf.bat` をダブルクリックしてPython依存パッケージを導入します。
 2. `start_autopdf.bat` をダブルクリックします。
@@ -27,9 +41,19 @@ Windowsではセットアップ時にTesseractエンジンと日本語・英語�
 初回はインターネット接続が必要です。通常は「Tesseract」欄を空欄のまま使い、「OCR言語」は `jpn+eng+fra` を選びます。
 独自のTesseract実行ファイルを指定した場合は、その実行環境にある言語データを使用します。
 
+### Windows配布版をビルドする場合
+
+セットアップ後、プロジェクト直下で次を実行します。出力先は `release/AutoPDF.exe` です。Git上の実行ファイルはGit LFSで管理します。
+
+```bat
+.venv\Scripts\python.exe -m pip install pyinstaller==6.22.3
+.venv\Scripts\python.exe -c "from pywinauto.uia_defines import IUIA; IUIA()"
+.venv\Scripts\python.exe -m PyInstaller -y --distpath release AutoPDF.spec
+```
+
 ## スキャンからPDF
 
-ログイン済みのChromeでは、DevToolsのデバイス表示を希望のサイズに整えたまま、「Chrome高解像度スキャン」→「開いているタブ」を使います。
+ログイン済みのChromeでは、DevToolsのデバイス表示を希望のサイズに整えたまま、「ページ画像保存・Chromeスキャン」→「開いているタブ」を使います。
 「スキャン→PDF」でページ送りの操作列を選び、Chromeタブで資料名と撮影枚数を指定します。保存サイズには出力するページ画像の幅と高さを指定します。Chromeから届いた画像は縦横比を保ってこの画素数に変換し、PDFにも指定画素数で収録します。
 Chromeのダウンロード先を選び、保存場所を毎回確認する設定はオフにします。DevToolsの空白と閲覧ページ内の余白をオーバーレイで指定します。
 DevToolsのコマンドメニューで英語の Capture screenshot が選択できる状態で開始してください。

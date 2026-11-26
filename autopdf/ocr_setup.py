@@ -6,7 +6,7 @@ from tempfile import NamedTemporaryFile
 from urllib.request import urlopen
 from shutil import copyfileobj
 
-DATA = Path(sys.prefix) / "share" / "autopdf-tessdata"
+DATA = Path(getattr(sys, "_MEIPASS", sys.prefix)) / "share" / "autopdf-tessdata"
 LANGUAGES = "jpn+eng+fra"
 HASHES = {
     "eng": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2",
