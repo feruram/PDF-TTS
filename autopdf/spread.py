@@ -1,6 +1,7 @@
 """Save each side of a spread with the viewer's image download menu."""
 import re
 import time
+import uuid
 
 from PIL import Image
 
@@ -96,7 +97,7 @@ def versions(folder):
     return result
 
 
-def click_save_button(owner):
+def click_save_button(owner, basename):
     import win32con
     import win32gui
 
@@ -114,26 +115,56 @@ def click_save_button(owner):
         if (button and win32gui.IsWindowEnabled(button)
                 and win32gui.GetClassName(button) == "Button"
                 and win32gui.GetWindowText(button).replace("&", "").lower() in ("保存", "保存(s)", "save")):
+            # Tag our own download so concurrent user downloads are never deleted.
+            edits = []
+            def collect_edit(hwnd, _):
+                if (win32gui.GetClassName(hwnd) == "Edit"
+                        and win32gui.GetDlgCtrlID(hwnd) == 1001
+                        and win32gui.IsWindowVisible(hwnd)):
+                    edits.append(hwnd)
+                return True
+            win32gui.EnumChildWindows(dialogs[0], collect_edit, None)
+            if len(edits) != 1:
+                return None
+            import ctypes
+            from pathlib import Path
+            edit = edits[0]
+            buf = ctypes.create_unicode_buffer(1024)
+            ctypes.windll.user32.SendMessageW(edit, win32con.WM_GETTEXT, len(buf), buf)
+            suffix = Path(buf.value).suffix.lower()
+            if suffix not in (".jpg", ".jpeg", ".png", ".webp", ".avif", ""):
+                return None
+            filename = basename + suffix
+            if buf.value != filename:
+                win32gui.SendMessage(edit, win32con.WM_SETTEXT, 0, filename)
             win32gui.PostMessage(button, win32con.BM_CLICK, 0, 0)
+            return filename
 
 
 def wait_image(folder, before, stop, owner):
     deadline = time.monotonic() + 30
     next_click = 0
+    basename = "autopdf-" + uuid.uuid4().hex
+    tagged = False
     while time.monotonic() < deadline:
         if stop.wait(.2):
             raise ScanCancelled()
         changed = [p for p, v in versions(folder).items() if before.get(p) != v]
+        if tagged:
+            changed = [p for p in changed if p.stem == basename]
         if len(changed) > 1:
             raise ValueError("複数の画像が届きました。ほかのダウンロードを止めてください。")
         if changed:
             try:
                 with Image.open(changed[0]) as image:
-                    return image.convert("RGB")
+                    source = changed[0]
+                    stat = source.stat()
+                    owned = source.stem == basename and source.suffix.lower() in (".jpg", ".jpeg")
+                    return image.convert("RGB"), source if owned else None, stat
             except OSError:
                 continue
         if time.monotonic() >= next_click:
-            click_save_button(owner)
+            tagged = bool(click_save_button(owner, basename)) or tagged
             next_click = time.monotonic() + 1
     raise ValueError("画像が届きません。保存先とChromeの保存ダイアログを確認してください。")
 
@@ -194,7 +225,7 @@ def capture_spread(root, name, count, folder, points, actions, confirm, report,
             menu_item.click_input()
         finally:
             pythoncom.CoUninitialize()
-        page = wait_image(folder, before, stop, owner)
+        page, download, downloaded_stat = wait_image(folder, before, stop, owner)
         for earlier in paths[-2:]:
             with Image.open(earlier) as last:
                 if last.size == page.size and last.convert("RGB").tobytes() == page.tobytes():
@@ -202,7 +233,20 @@ def capture_spread(root, name, count, folder, points, actions, confirm, report,
         path = job / f"page-{index+1:04}.png"
         tmp = path.with_suffix(".tmp")
         page.save(tmp, format="PNG")
+        with Image.open(tmp) as saved:
+            saved.verify()
         tmp.replace(path)
+        if download is not None:
+            try:
+                current = download.stat()
+                if (current.st_ino, current.st_size, current.st_mtime_ns) == (
+                    downloaded_stat.st_ino, downloaded_stat.st_size, downloaded_stat.st_mtime_ns
+                ):
+                    download.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                report(f"PNG保存済み。元のJPEGを削除できませんでした：{exc}")
         paths.append(path)
         report(f"{index+1}/{count} 枚保存　{page.width}×{page.height} px")
         if index == 0 and count > 1:
@@ -225,3 +269,30 @@ def capture_spread(root, name, count, folder, points, actions, confirm, report,
     destination = job / "book.pdf"
     assemble(paths, destination)
     return destination
+
+def remove_pdf_cache(pdf, paths):
+    import pikepdf
+    from PIL import ImageChops
+    # Older releases also used one original-size RGB image per spread-mode PDF page.
+    verified = []
+    with pikepdf.open(pdf) as document:
+        for path in paths:
+            index = int(path.stem[5:]) - 1
+            if not 0 <= index < len(document.pages) or path.name != f"page-{index+1:04}.png":
+                raise ValueError("未収録のPNGがあります。削除を中止しました。")
+            images = list(document.pages[index].get_images().values())
+            if len(images) != 1:
+                raise ValueError("PDF内の画像を照合できません。")
+            stat = path.stat()
+            with Image.open(path) as png, pikepdf.PdfImage(images[0]).as_pil_image() as embedded:
+                if png.size != embedded.size or ImageChops.difference(
+                    png.convert("RGB"), embedded.convert("RGB")
+                ).getbbox():
+                    raise ValueError("PDFと一致しないPNGがあります。削除を中止しました。")
+            verified.append((path, stat))
+    for path, stat in verified:
+        now = path.stat()
+        if (now.st_ino, now.st_mtime_ns, now.st_size) != (stat.st_ino, stat.st_mtime_ns, stat.st_size):
+            raise ValueError("照合後にPNGが更新されたため、削除を中止しました。")
+        path.unlink()
+    return len(verified)

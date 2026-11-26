@@ -5,7 +5,7 @@ import tkinter as tk
 import threading
 from queue import Empty, Queue
 from pathlib import Path
-from tkinter import StringVar, filedialog, ttk
+from tkinter import StringVar, filedialog, messagebox, ttk
 
 from .spread import capture_spread
 from .emulator import capture_emulator
@@ -84,6 +84,7 @@ class ChromeFrame(ttk.Frame):
                     label.set(f"{i+1}ページ目 {point}")
                 self.winfo_toplevel().scanner._pick_on_screen(point=True, apply_selection=selected)
             ttk.Button(spread_box, textvariable=label, command=pick).pack(side="left")
+        ttk.Button(spread_box, text="完成PDFのPNGを一括削除", command=self.clear_cache).pack(side="left")
         def show_saved(*_):
             name = self.name.get().strip()
             if name:
@@ -147,6 +148,36 @@ class ChromeFrame(ttk.Frame):
         self.history = tk.Text(self, height=6, state="disabled", wrap="word")
         self.history.grid(row=9, columnspan=2, sticky="ew")
         self.after(100, self.poll)
+
+    def clear_cache(self):
+        if self.running or not self.name.get().strip():
+            self.status.set("処理終了後に資料名を指定してください。")
+            return
+        job = scan_folder(self.root / "output/spread", self.name.get().strip())
+        pdf = job / "book.pdf"
+        paths = sorted(job.glob("page-*.png"))
+        if not pdf.is_file() or not paths:
+            self.status.set("完成したPDFと削除対象のPNGがそろっていません。")
+            return
+        if not messagebox.askyesno("PNGキャッシュの削除",
+                f"「{self.name.get().strip()}」の完成PDFと照合し、PNG {len(paths)}枚を削除します。"
+                "削除後は画像からの続き撮影ができなくなります。続行しますか？", parent=self):
+            return
+        self.running = True
+        self.use_existing = False
+        self.start.state(["disabled"])
+        self.status.set(f"PDFとPNG {len(paths)}枚を照合中…")
+
+        def clean():
+            try:
+                from .spread import remove_pdf_cache
+                removed = remove_pdf_cache(pdf, paths)
+                result = f"PNG {removed}枚を削除しました。PDF：{pdf}"
+            except Exception as exc:
+                result = str(exc)
+            self.events.put(("done", result, None))
+
+        threading.Thread(target=clean, daemon=True).start()
 
     def select_folder(self):
         folder = filedialog.askdirectory(parent=self)
