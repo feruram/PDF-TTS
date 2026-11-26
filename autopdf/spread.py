@@ -1,5 +1,4 @@
 """Save each side of a spread with the viewer's image download menu."""
-import ctypes
 import re
 import time
 
@@ -76,9 +75,30 @@ def versions(folder):
     return result
 
 
-def wait_image(folder, before, stop):
+def click_save_button(owner):
+    import win32con
+    import win32gui
+
+    dialogs = []
+    def collect(hwnd, _):
+        if (win32gui.IsWindowVisible(hwnd) and win32gui.IsWindowEnabled(hwnd)
+                and win32gui.GetClassName(hwnd) == "#32770"
+                and win32gui.GetWindow(hwnd, win32con.GW_OWNER) == owner
+                and win32gui.GetWindowText(hwnd) in ("名前を付けて保存", "Save As")):
+            dialogs.append(hwnd)
+        return True
+    win32gui.EnumWindows(collect, None)
+    if len(dialogs) == 1:
+        button = win32gui.GetDlgItem(dialogs[0], win32con.IDOK)
+        if (button and win32gui.IsWindowEnabled(button)
+                and win32gui.GetClassName(button) == "Button"
+                and win32gui.GetWindowText(button).replace("&", "").lower() in ("保存", "保存(s)", "save")):
+            win32gui.PostMessage(button, win32con.BM_CLICK, 0, 0)
+
+
+def wait_image(folder, before, stop, owner):
     deadline = time.monotonic() + 30
-    accepted = False
+    next_click = 0
     while time.monotonic() < deadline:
         if stop.wait(.2):
             raise ScanCancelled()
@@ -91,15 +111,9 @@ def wait_image(folder, before, stop):
                     return image.convert("RGB")
             except OSError:
                 continue
-        if not accepted:
-            import pyautogui
-            user = ctypes.windll.user32
-            hwnd = user.GetForegroundWindow()
-            title = ctypes.create_unicode_buffer(256)
-            user.GetWindowTextW(hwnd, title, 256)
-            if title.value in ("名前を付けて保存", "Save As"):
-                pyautogui.press("enter")
-                accepted = True
+        if time.monotonic() >= next_click:
+            click_save_button(owner)
+            next_click = time.monotonic() + 1
     raise ValueError("画像が届きません。保存先とChromeの保存ダイアログを確認してください。")
 
 
@@ -152,10 +166,13 @@ def capture_spread(root, name, count, folder, points, actions, confirm, report,
                 pyautogui.press("esc")
                 raise ValueError(f"{index+1}枚目の位置で「名前を付けて画像を保存」が見つかりません。"
                                  "DevToolsを右に表示し、端末エミュレーションをオフにして、本文内の位置を再指定してください。")
-            menu_item.invoke()
+            import win32gui
+            owner = win32gui.GetForegroundWindow()
+            # A synchronous Invoke can wait for the modal save dialog to close.
+            menu_item.click_input()
         finally:
             pythoncom.CoUninitialize()
-        page = wait_image(folder, before, stop)
+        page = wait_image(folder, before, stop, owner)
         for earlier in paths[-2:]:
             with Image.open(earlier) as last:
                 if last.size == page.size and last.convert("RGB").tobytes() == page.tobytes():
